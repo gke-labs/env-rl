@@ -7,7 +7,8 @@ which fixed a wake-probe cancellation bug found by property and state-machine te
 `internal/apiservice`. `AE-4` met by #278, which also holds a base that already mounts the guest to
 the guest-slot rule. `WF-3` to `WF-6` met by #275, which keeps a wake going through a transient
 control-plane error on the state read and bounds that read by the wake budget and the no-capacity
-grace. Every criterion in this file is scoped to the Go `ate-env-api` server and names the tests
+grace. `AE-6` to `AE-10` (`ListEnvironments` and `Environment.create_time`, part 1 of #387) are
+`planned`. Every criterion in this file is scoped to the Go `ate-env-api` server and names the tests
 that check it on every pull request in the Go job (`go test -race ./...`).
 
 ## Derived image templates
@@ -78,6 +79,27 @@ image check as the mitigation for "a caller runs an image of its choice".
 
 Neither `AE-1`, `AE-2` nor `AE-4` is a clock bug, so `testing/synctest` alone would not have
 generated those inputs.
+
+## Listing environments
+
+### Scope
+
+`ListEnvironments` returns the environments of one atespace, one page per call (`ListEnvironments`
+in [internal/apiservice/server.go](../../../internal/apiservice/server.go)). It reads one page of
+Substrate's `ListActors` (`ListPage` in [internal/ate/client.go](../../../internal/ate/client.go))
+and converts each actor with `ActorToEnvironment`, as `GetEnvironment` does. The page token is
+Substrate's. `Environment` gains `create_time`, the actor's `metadata.create_time`. Labels, a label
+filter and a time to live are part 2 of #387 and are not in these criteria.
+
+### Criteria
+
+| ID    | Criterion                                                                                                                                                                                                                                                                                                                                                                                                                                                | Status  | Tests                                        |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------- |
+| AE-6  | `ListEnvironments` returns the environments of the request's atespace and of no other atespace. An empty `atespace` means `DefaultAtespace`. Each environment has the fields `GetEnvironment` reports for it. An atespace with no environments returns an empty page and no token.                                                                                                                                                                       | planned | `TestListEnvironmentsReturnsOneAtespace`     |
+| AE-7  | `page_size` bounds the actors read per call: `0` reads `DefaultListPageSize` (100), a value above `MaxListPageSize` (1000) reads 1000 and is not refused, and a negative value is `InvalidArgument`.                                                                                                                                                                                                                                                     | planned | `TestListEnvironmentsPageSize`               |
+| AE-8  | `page_token` goes to Substrate unchanged, and `next_page_token` is the token Substrate returns: empty on the last page. A caller that follows the tokens from an empty one reads each environment of the atespace once. A token Substrate refuses is `InvalidArgument`.                                                                                                                                                                                  | planned | `TestListEnvironmentsFollowsSubstrateTokens` |
+| AE-9  | With `statuses`, a page holds only the environments of the page read from Substrate whose status is in the set, and `next_page_token` is unchanged by the filter. Thus a page can be shorter than `page_size`, or empty with a token. Empty `statuses` keeps all. `ENVIRONMENT_STATUS_PAUSED` selects the environments `GetEnvironment` reports as paused. A value outside `EnvironmentStatus` is `InvalidArgument`, and no list call reaches Substrate. | planned | `TestListEnvironmentsStatusFilter`           |
+| AE-10 | `Environment.create_time` equals the actor's `metadata.create_time` in the responses of `CreateEnvironment`, `GetEnvironment` and `ListEnvironments`.                                                                                                                                                                                                                                                                                                    | planned | `TestEnvironmentCreateTime`                  |
 
 ## Wake budgets, fail-fast, and cancellation
 
