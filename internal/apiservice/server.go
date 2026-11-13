@@ -196,7 +196,8 @@ func (s *Server) CreateEnvironment(ctx context.Context, req *ateenvv1alpha.Creat
 		Atespace:       atespace,
 		WorkerSelector: req.GetWorkerSelector(),
 	}
-	if err := s.client.Create(ctx, opts); err != nil {
+	actor, err := s.client.Create(ctx, opts)
+	if err != nil {
 		return nil, toGRPCError(err)
 	}
 
@@ -210,6 +211,7 @@ func (s *Server) CreateEnvironment(ctx context.Context, req *ateenvv1alpha.Creat
 			},
 			Status:         ateenvv1alpha.EnvironmentStatus_ENVIRONMENT_STATUS_UNSPECIFIED,
 			WorkerSelector: req.GetWorkerSelector(),
+			CreateTime:     actor.GetMetadata().GetCreateTime(),
 		},
 	}, nil
 }
@@ -428,6 +430,63 @@ func (s *Server) GetEnvironment(ctx context.Context, req *ateenvv1alpha.GetEnvir
 	return &ateenvv1alpha.GetEnvironmentResponse{
 		Environment: ActorToEnvironment(actor),
 	}, nil
+}
+
+// Page sizes of ListEnvironments: the actors one call reads from Substrate.
+const (
+	// DefaultListPageSize is what a request with page_size 0 reads.
+	DefaultListPageSize = 100
+	// MaxListPageSize is Substrate's largest page. A larger page_size reads
+	// this many.
+	MaxListPageSize = 1000
+)
+
+// ListEnvironments returns one page of the environments of one atespace: one
+// page of Substrate's actors, each converted as GetEnvironment does, with
+// Substrate's token for the next page.
+//
+// The statuses filter applies to the page after the read. A page can thus
+// hold fewer environments than page_size, or none, while next_page_token is
+// set.
+//
+// Errors: InvalidArgument for a negative page_size, a status outside
+// EnvironmentStatus, or a page_token Substrate refuses. Other control plane
+// failures are mapped by toGRPCError.
+func (s *Server) ListEnvironments(ctx context.Context, req *ateenvv1alpha.ListEnvironmentsRequest) (*ateenvv1alpha.ListEnvironmentsResponse, error) {
+	size := req.GetPageSize()
+	switch {
+	case size < 0:
+		return nil, status.Errorf(codes.InvalidArgument, "page_size %d is negative", size)
+	case size == 0:
+		size = DefaultListPageSize
+	case size > MaxListPageSize:
+		size = MaxListPageSize
+	}
+	keep := make(map[ateenvv1alpha.EnvironmentStatus]bool, len(req.GetStatuses()))
+	for _, st := range req.GetStatuses() {
+		if _, ok := ateenvv1alpha.EnvironmentStatus_name[int32(st)]; !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "status %d is not an EnvironmentStatus", st)
+		}
+		keep[st] = true
+	}
+	atespace := req.GetAtespace()
+	if atespace == "" {
+		atespace = DefaultAtespace
+	}
+
+	actors, next, err := s.client.ListPage(ctx, atespace, size, req.GetPageToken())
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	resp := &ateenvv1alpha.ListEnvironmentsResponse{NextPageToken: next}
+	for _, actor := range actors {
+		env := ActorToEnvironment(actor)
+		if len(keep) > 0 && !keep[env.GetStatus()] {
+			continue
+		}
+		resp.Environments = append(resp.Environments, env)
+	}
+	return resp, nil
 }
 
 // SuspendEnvironment checkpoints and stops an active environment.
@@ -772,6 +831,7 @@ func ActorToEnvironment(actor *ateapipb.Actor) *ateenvv1alpha.Environment {
 		Status:         ActorStatusToEnvStatus(actor.GetStatus()),
 		Node:           actorNode(actor.GetStatus()),
 		WorkerSelector: actor.GetWorkerSelector().GetMatchLabels(),
+		CreateTime:     actor.GetMetadata().GetCreateTime(),
 	}
 }
 

@@ -53,6 +53,16 @@
     }
   },
   {
+    "operation": "list_environments",
+    "inputs": {
+      "atespace": "t-space"
+    },
+    "expected_span": "list_environments",
+    "expected_attributes": {
+      "ate.atespace": "t-space"
+    }
+  },
+  {
     "operation": "suspend_environment",
     "inputs": {
       "id": "traced",

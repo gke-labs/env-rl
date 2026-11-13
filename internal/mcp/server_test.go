@@ -158,7 +158,7 @@ func TestGuestMCPProxy(t *testing.T) {
 	router.Register("web-1", grpcGuestServer)
 
 	// Create environment via direct client.
-	if err := client.Create(t.Context(), ate.CreateOptions{
+	if _, err := client.Create(t.Context(), ate.CreateOptions{
 		ID:       "web-1",
 		Template: "default-template",
 		Atespace: "envs",

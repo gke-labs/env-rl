@@ -61,10 +61,10 @@ type ClientOptions struct {
 
 	// TracerProvider, when set, makes the client emit OpenTelemetry spans
 	// named "<TraceServiceName>.<operation>" (create_environment,
-	// get_environment, suspend_environment, delete_environment,
-	// get_server_info, get_image_status, ensure_image_template,
-	// list_placement_domains, warm_image, start_process, exec, read_file,
-	// write_file) with ate.* / ate_env.* attributes, the same as the Python
+	// get_environment, list_environments, suspend_environment,
+	// delete_environment, get_server_info, get_image_status,
+	// ensure_image_template, list_placement_domains, warm_image,
+	// start_process, exec, read_file, write_file) with ate.* / ate_env.* attributes, the same as the Python
 	// client's, and send their W3C trace context to ate-env-api so its spans
 	// join the same trace. Nil means no spans; the client never creates an
 	// exporter itself (see NewTracerProvider). With GRPCConn set, the client
@@ -295,6 +295,25 @@ func (c *Client) get(ctx context.Context, cn *conn, atespace, id string) (_ *ate
 		return nil, fromGRPCError(err)
 	}
 	return resp.GetEnvironment(), nil
+}
+
+// List returns one page of the environments of one atespace: the
+// environments and the token of the next page, empty on the last one. A nil
+// or empty request reads the first page of the default atespace with the
+// server's page size. With req.Statuses, the server filters each page after
+// it reads it, thus a page can hold fewer environments than the page size,
+// or none, while the token is set: follow the token until it is empty.
+func (c *Client) List(ctx context.Context, req *ateenvv1alpha.ListEnvironmentsRequest) (_ *ateenvv1alpha.ListEnvironmentsResponse, err error) {
+	if req == nil {
+		req = &ateenvv1alpha.ListEnvironmentsRequest{}
+	}
+	ctx, span := c.tracer.startRPC(ctx, opListEnvironments, "ListEnvironments", AttrAtespace.String(req.GetAtespace()))
+	defer func() { endSpan(span, err) }()
+	resp, err := c.pick().env.ListEnvironments(c.withAuth(ctx), req)
+	if err != nil {
+		return nil, fromGRPCError(err)
+	}
+	return resp, nil
 }
 
 // Suspend checkpoints and stops the environment using the gRPC

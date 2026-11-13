@@ -525,6 +525,8 @@ func TestSpansParity(t *testing.T) {
 				_, err = c.Create(ctx, &ateenvv1alpha.CreateEnvironmentRequest{Id: id, Atespace: atespace, Template: tmpl, RootfsImage: rootfsImage})
 			case "get_environment":
 				_, err = c.Get(ctx, atespace, id)
+			case "list_environments":
+				_, err = c.List(ctx, &ateenvv1alpha.ListEnvironmentsRequest{Atespace: atespace})
 			case "suspend_environment":
 				err = c.Suspend(ctx, atespace, id)
 			case "delete_environment":

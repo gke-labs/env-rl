@@ -714,7 +714,7 @@ func (s *Server) warmProbe(ctx context.Context, atespace, template string, selec
 	// CreateActor call and its failure is that call's.
 	cut := false
 	err := warmRetry(pctx, warmCreateAttemptTimeout, func(ctx context.Context, _ int) error {
-		err := s.client.CreateActor(ctx, opts)
+		_, err := s.client.CreateActor(ctx, opts)
 		if err == nil || (cut && grpcCode(err) == codes.AlreadyExists) {
 			return nil
 		}

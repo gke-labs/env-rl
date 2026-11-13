@@ -29,6 +29,18 @@ user needs to know across them.
   pre-flight's job (`swebench-loader preflight`), not the prewarm's.
 
 ### Added
+- `ListEnvironments` on `EnvironmentService`: the environments of one
+  atespace, one page per call. `page_size` defaults to 100, and the server
+  lowers a value above 1000 to 1000. `page_token` is Substrate's token. An
+  optional `statuses` filter applies to each page after the server reads it,
+  thus a page can hold fewer environments than `page_size`, or none, while
+  `next_page_token` is set: follow the token until it is empty. Go client:
+  `Client.List`. Python client: `Client.list_environments()`, which returns
+  an `EnvironmentPage`. Labels and a label filter are not part of it (#387).
+- `Environment.create_time`: when Substrate created the environment's actor,
+  on `CreateEnvironment`, `GetEnvironment` and `ListEnvironments`. Python:
+  `EnvironmentInfo.create_time`, a UTC `datetime`, or `None` from a server
+  that predates the field.
 - `integrations/e2b`: the package `ate-env-e2b` (e2b 2.63 to below 3, Python
   3.11 or newer). `ate_env_e2b.Sandbox` and `ate_env_e2b.AsyncSandbox` are
   subclasses of `e2b.Sandbox` and `e2b.AsyncSandbox`: a program changes its

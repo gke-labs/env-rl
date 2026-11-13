@@ -62,7 +62,7 @@ defer client.Close()
 
 The `Client` lifecycle methods operate on environments. You can `Create` an environment and get an
 `Env` handle. The `Env` struct exposes `ID`, `Info`, and `Atespace` methods. Other lifecycle
-operations include `Get`, `ServerInfo`, `EnsureImageTemplate`, and `ListPlacementDomains`.
+operations include `Get`, `List`, `ServerInfo`, `EnsureImageTemplate`, and `ListPlacementDomains`.
 
 ```go
 env, err := client.Create(ctx, &ateenvv1alpha.CreateEnvironmentRequest{Id: "dev1"})

@@ -419,9 +419,10 @@ Conventions:
 ## AC-17: The Go and Python clients agree
 
 - 17.1: for each operation both clients have (`create_environment`, `get_environment`,
-  `suspend_environment`, `delete_environment`, `get_server_info`, `get_image_status`,
-  `ensure_image_template`, `list_placement_domains`, `warm_image`, `start_process`, `exec`,
-  `read_file`, `write_file`), the span names are `<service>.<op>` with the same `<op>`.
+  `list_environments`, `suspend_environment`, `delete_environment`, `get_server_info`,
+  `get_image_status`, `ensure_image_template`, `list_placement_domains`, `warm_image`,
+  `start_process`, `exec`, `read_file`, `write_file`), the span names are `<service>.<op>` with the
+  same `<op>`.
 - 17.2: for the same inputs, both clients record the same `ate.*` and `ate_env.*` keys and values,
   except the differences [decisions.md](./decisions.md) records (`ate_env.run_id` is Python
   fleet-only; the `exec` span name pairs `Env.Run` with `SandboxHandle.exec` while Python's direct

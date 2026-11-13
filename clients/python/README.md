@@ -170,6 +170,21 @@ info = await client.get("t1")
 print((await env.info()).template.name)   # default-template-<12 hex of the digest>
 ```
 
+To list the environments of an atespace, read pages until the token is empty.
+`statuses` filters each page on the server after it reads it, thus a page can
+be short, or empty, while `next_page_token` is set:
+
+```python
+token = ""
+while True:
+    page = await client.list_environments(page_token=token, statuses=[EnvironmentStatus.RUNNING])
+    for info in page.environments:
+        print(info.id, info.status.name, info.node, info.create_time)
+    token = page.next_page_token
+    if not token:
+        break
+```
+
 To get a handle to an environment that already exists (no RPC is made):
 
 ```python

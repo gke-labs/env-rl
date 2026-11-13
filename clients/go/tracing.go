@@ -61,6 +61,7 @@ const (
 const (
 	opCreateEnvironment    = "create_environment"
 	opGetEnvironment       = "get_environment"
+	opListEnvironments     = "list_environments"
 	opSuspendEnvironment   = "suspend_environment"
 	opDeleteEnvironment    = "delete_environment"
 	opStartProcess         = "start_process"

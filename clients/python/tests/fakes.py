@@ -147,6 +147,7 @@ class FakeEnvironmentService(env_pb2_grpc.EnvironmentServiceServicer):
             template=template,
             status=env_pb2.ENVIRONMENT_STATUS_RUNNING,
         )
+        environment.create_time.GetCurrentTime()
         environment.worker_selector.update(worker_selector)
         domain = worker_selector.get("ate-env/domain", "")
         if nodes := self.domain_nodes.get(domain):
@@ -163,6 +164,30 @@ class FakeEnvironmentService(env_pb2_grpc.EnvironmentServiceServicer):
     async def GetEnvironment(self, request, context):
         environment = await self._lookup(request, context)
         return env_pb2.GetEnvironmentResponse(environment=environment)
+
+    async def ListEnvironments(self, request, context):
+        # Mirror ate-env-api: one page of the atespace in id order, 100 per
+        # page unless asked, at most 1000; the status filter applies to the
+        # page after the read and leaves the token alone. The token is the
+        # offset of the next page.
+        if request.page_size < 0:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"page_size {request.page_size} is negative")
+        for s in request.statuses:
+            if s not in env_pb2.EnvironmentStatus.values():
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"status {s} is not an EnvironmentStatus")
+        atespace = request.atespace or "ate-env"
+        ids = sorted(env_id for space, env_id in self.environments if space == atespace)
+        start = 0
+        if request.page_token:
+            if not request.page_token.isdigit() or int(request.page_token) > len(ids):
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid page_token")
+            start = int(request.page_token)
+        end = start + min(request.page_size or 100, 1000)
+        page = [self.environments[(atespace, env_id)] for env_id in ids[start:end]]
+        return env_pb2.ListEnvironmentsResponse(
+            environments=[e for e in page if not request.statuses or e.status in request.statuses],
+            next_page_token=str(end) if end < len(ids) else "",
+        )
 
     async def SuspendEnvironment(self, request, context):
         environment = await self._lookup(request, context)

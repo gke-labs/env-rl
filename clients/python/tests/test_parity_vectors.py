@@ -180,6 +180,7 @@ def test_rpc_coverage():
 SHARED_SPAN_OPERATIONS = {
     "create_environment",
     "get_environment",
+    "list_environments",
     "suspend_environment",
     "delete_environment",
     "get_server_info",
@@ -271,6 +272,8 @@ async def test_spans_parity(v, spans, fake_stack):
         await client.create(**kwargs)
     elif op == "get_environment":
         await client.get(id_val, **atespace_kw)
+    elif op == "list_environments":
+        await client.list_environments(**atespace_kw)
     elif op == "suspend_environment":
         await client.suspend(id_val, **atespace_kw)
     elif op == "delete_environment":

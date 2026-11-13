@@ -456,6 +456,7 @@ func TestTracingCallerConnSpansMatchPythonClient(t *testing.T) {
 	_, _ = c.ImageStatus(t.Context(), &ateenvv1alpha.GetImageStatusRequest{RootfsImage: "registry.example/repo@" + digest})
 	_, _ = c.EnsureImageTemplate(t.Context(), &ateenvv1alpha.EnsureImageTemplateRequest{RootfsImage: "registry.example/repo@" + digest})
 	_, _ = c.ListPlacementDomains(t.Context(), &ateenvv1alpha.ListPlacementDomainsRequest{Template: &ateenvv1alpha.Template{Name: "layered", Atespace: "t-space"}})
+	_, _ = c.List(t.Context(), nil)
 	_, _ = c.WarmImage(t.Context(), &ateenvv1alpha.WarmImageRequest{RootfsImage: "registry.example/repo@" + digest, Nodes: 1, Template: &ateenvv1alpha.Template{Name: "layered", Atespace: "t-space"}}, nil)
 
 	spans := map[string][]sdktrace.ReadOnlySpan{}
@@ -470,6 +471,7 @@ func TestTracingCallerConnSpansMatchPythonClient(t *testing.T) {
 		"get_server_info":  "GetServerInfo",
 		"get_image_status": "GetImageStatus", "ensure_image_template": "EnsureImageTemplate",
 		"list_placement_domains": "ListPlacementDomains", "warm_image": "WarmImage",
+		"list_environments": "ListEnvironments",
 	} {
 		if len(spans[prefix+op]) == 0 {
 			t.Errorf("no %s span", op)

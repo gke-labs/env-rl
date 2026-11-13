@@ -92,6 +92,7 @@ from .sources import (
 from .types import (
     DataPlaneEndpoint,
     EnvironmentInfo,
+    EnvironmentPage,
     EnvironmentSpec,
     EnvironmentStatus,
     ExecResult,
@@ -178,6 +179,7 @@ __all__ = [
     "SandboxUnavailableError",
     # Types
     "EnvironmentInfo",
+    "EnvironmentPage",
     "EnvironmentStatus",
     "SuspendMode",
     "ProcessInfo",

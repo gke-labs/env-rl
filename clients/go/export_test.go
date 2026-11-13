@@ -61,6 +61,7 @@ var NonEmptyForTest = nonEmpty
 var SpanOperationsForTest = []string{
 	opCreateEnvironment,
 	opGetEnvironment,
+	opListEnvironments,
 	opSuspendEnvironment,
 	opDeleteEnvironment,
 	opStartProcess,

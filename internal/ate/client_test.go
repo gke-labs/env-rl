@@ -84,7 +84,7 @@ func (f *fixture) create(t *testing.T, id string) {
 	t.Helper()
 	f.router.Register(id, http.NotFoundHandler())
 	req := ate.CreateOptions{ID: id, Template: "default-template"}
-	if err := f.client.Create(t.Context(), req); err != nil {
+	if _, err := f.client.Create(t.Context(), req); err != nil {
 		t.Fatalf("creating actor %q: %v", id, err)
 	}
 }
@@ -263,7 +263,7 @@ func TestCreateRequiresTemplate(t *testing.T) {
 	}
 	t.Cleanup(func() { client.Close() })
 
-	if err := client.Create(context.Background(), ate.CreateOptions{ID: "sb-x"}); err == nil {
+	if _, err := client.Create(context.Background(), ate.CreateOptions{ID: "sb-x"}); err == nil {
 		t.Fatal("Create without template succeeded, want error")
 	}
 }
@@ -354,7 +354,7 @@ func TestNewControlClientInSynctest(t *testing.T) {
 		}); err != nil {
 			bt.Fatalf("GetActorTemplate: %v", err)
 		}
-		if err := client.Create(ctx, ate.CreateOptions{Atespace: "bubble-space", ID: "a1", Template: "tpl"}); err != nil {
+		if _, err := client.Create(ctx, ate.CreateOptions{Atespace: "bubble-space", ID: "a1", Template: "tpl"}); err != nil {
 			bt.Fatalf("Create: %v", err)
 		}
 		if _, err := client.Get(ctx, "bubble-space", "a1"); err != nil {

@@ -40,9 +40,7 @@ if _version_not_supported:
 
 
 class EnvironmentServiceStub:
-    """TODO(jbd): Add ListEnvironments to EnvironmentService.
-
-    ============================================================================
+    """============================================================================
     --- SERVICES ---
     ============================================================================
 
@@ -64,6 +62,11 @@ class EnvironmentServiceStub:
                 '/ateenv.v1alpha.EnvironmentService/GetEnvironment',
                 request_serializer=ateenv_dot_v1alpha_dot_env__pb2.GetEnvironmentRequest.SerializeToString,
                 response_deserializer=ateenv_dot_v1alpha_dot_env__pb2.GetEnvironmentResponse.FromString,
+                _registered_method=True)
+        self.ListEnvironments = channel.unary_unary(
+                '/ateenv.v1alpha.EnvironmentService/ListEnvironments',
+                request_serializer=ateenv_dot_v1alpha_dot_env__pb2.ListEnvironmentsRequest.SerializeToString,
+                response_deserializer=ateenv_dot_v1alpha_dot_env__pb2.ListEnvironmentsResponse.FromString,
                 _registered_method=True)
         self.SuspendEnvironment = channel.unary_unary(
                 '/ateenv.v1alpha.EnvironmentService/SuspendEnvironment',
@@ -103,9 +106,7 @@ class EnvironmentServiceStub:
 
 
 class EnvironmentServiceServicer:
-    """TODO(jbd): Add ListEnvironments to EnvironmentService.
-
-    ============================================================================
+    """============================================================================
     --- SERVICES ---
     ============================================================================
 
@@ -121,6 +122,17 @@ class EnvironmentServiceServicer:
 
     def GetEnvironment(self, request, context):
         """GetEnvironment retrieves the status and configuration of an existing environment.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListEnvironments(self, request, context):
+        """ListEnvironments returns the environments of one atespace, one page per
+        call. The server reads one page of Substrate's actors and converts each
+        as GetEnvironment does. The status filter applies to that page after the
+        read, thus a page can be shorter than page_size, or empty with a
+        next_page_token: follow the token until it is empty.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -213,6 +225,11 @@ def add_EnvironmentServiceServicer_to_server(servicer, server):
                     request_deserializer=ateenv_dot_v1alpha_dot_env__pb2.GetEnvironmentRequest.FromString,
                     response_serializer=ateenv_dot_v1alpha_dot_env__pb2.GetEnvironmentResponse.SerializeToString,
             ),
+            'ListEnvironments': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListEnvironments,
+                    request_deserializer=ateenv_dot_v1alpha_dot_env__pb2.ListEnvironmentsRequest.FromString,
+                    response_serializer=ateenv_dot_v1alpha_dot_env__pb2.ListEnvironmentsResponse.SerializeToString,
+            ),
             'SuspendEnvironment': grpc.unary_unary_rpc_method_handler(
                     servicer.SuspendEnvironment,
                     request_deserializer=ateenv_dot_v1alpha_dot_env__pb2.SuspendEnvironmentRequest.FromString,
@@ -257,9 +274,7 @@ def add_EnvironmentServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class EnvironmentService:
-    """TODO(jbd): Add ListEnvironments to EnvironmentService.
-
-    ============================================================================
+    """============================================================================
     --- SERVICES ---
     ============================================================================
 
@@ -310,6 +325,33 @@ class EnvironmentService:
             '/ateenv.v1alpha.EnvironmentService/GetEnvironment',
             ateenv_dot_v1alpha_dot_env__pb2.GetEnvironmentRequest.SerializeToString,
             ateenv_dot_v1alpha_dot_env__pb2.GetEnvironmentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListEnvironments(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ateenv.v1alpha.EnvironmentService/ListEnvironments',
+            ateenv_dot_v1alpha_dot_env__pb2.ListEnvironmentsRequest.SerializeToString,
+            ateenv_dot_v1alpha_dot_env__pb2.ListEnvironmentsResponse.FromString,
             options,
             channel_credentials,
             insecure,

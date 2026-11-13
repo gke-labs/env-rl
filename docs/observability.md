@@ -87,7 +87,7 @@ ate_env_fleet.run                                          ate-env-fleet
 
 A Go client's spans take the place of the `ate_env_client.*` ones, named
 `<TraceServiceName>.<operation>` (`create_environment`, `get_environment`,
-`suspend_environment`, `delete_environment`, `get_server_info`,
+`list_environments`, `suspend_environment`, `delete_environment`, `get_server_info`,
 `get_image_status`, `ensure_image_template`, `list_placement_domains`,
 `warm_image`, `start_process`, `exec`, `read_file`, `write_file`), as children
 of whatever span the caller's context carries.

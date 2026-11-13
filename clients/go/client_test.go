@@ -213,6 +213,68 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+// TestList: List reads the environments of an atespace page by page through
+// the real handler, with the status filter (AE-6, AE-8 and AE-9 of
+// docs/plans/ate-env-api/acceptance-criteria.md) and the create time (AE-10).
+func TestList(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+	for _, id := range []string{"sb-a", "sb-b", "sb-c"} {
+		f.create(t, id)
+	}
+	if err := f.client.Suspend(ctx, "envs", "sb-b"); err != nil {
+		t.Fatalf("Suspend: %v", err)
+	}
+
+	var got []string
+	req := &ateenvv1alpha.ListEnvironmentsRequest{Atespace: "envs", PageSize: 2}
+	for pages := 0; ; pages++ {
+		resp, err := f.client.List(ctx, req)
+		if err != nil {
+			t.Fatalf("List(token=%q): %v", req.GetPageToken(), err)
+		}
+		for _, e := range resp.GetEnvironments() {
+			got = append(got, e.GetId())
+			if e.GetCreateTime() == nil {
+				t.Errorf("%s has create_time %v, want a time", e.GetId(), e.GetCreateTime())
+			}
+		}
+		if req.PageToken = resp.GetNextPageToken(); req.PageToken == "" {
+			if pages != 1 {
+				t.Errorf("3 environments in pages of 2 took %d pages, want 2", pages+1)
+			}
+			break
+		}
+	}
+	if want := []string{"sb-a", "sb-b", "sb-c"}; !slices.Equal(got, want) {
+		t.Errorf("List read %v, want %v", got, want)
+	}
+
+	resp, err := f.client.List(ctx, &ateenvv1alpha.ListEnvironmentsRequest{
+		Atespace: "envs",
+		Statuses: []ateenvv1alpha.EnvironmentStatus{ateenvv1alpha.EnvironmentStatus_ENVIRONMENT_STATUS_SUSPENDED},
+	})
+	if err != nil {
+		t.Fatalf("List(SUSPENDED): %v", err)
+	}
+	if envs := resp.GetEnvironments(); len(envs) != 1 || envs[0].GetId() != "sb-b" {
+		t.Errorf("List(SUSPENDED) = %v, want sb-b alone", envs)
+	}
+
+	// A nil request lists the default atespace, which has no environments.
+	resp, err = f.client.List(ctx, nil)
+	if err != nil {
+		t.Fatalf("List(nil): %v", err)
+	}
+	if len(resp.GetEnvironments()) != 0 {
+		t.Errorf("List(nil) = %v, want no environments in the default atespace", resp.GetEnvironments())
+	}
+
+	if _, err := f.client.List(ctx, &ateenvv1alpha.ListEnvironmentsRequest{PageSize: -1}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("List(page_size=-1): got %v, want InvalidArgument", err)
+	}
+}
+
 // The client's DefaultAtespace is a copy of the server's (the client imports
 // no internal package outside tests); the two must stay equal.
 func TestDefaultAtespaceMatchesTheServer(t *testing.T) {

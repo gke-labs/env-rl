@@ -346,14 +346,15 @@ func (o CreateOptions) check() (string, error) {
 
 // Create registers a new actor from opts and starts it, creating its
 // atespace first when it is missing. ID and Template are required. Atespace
-// is the Substrate atespace the actor and template live in.
-func (c *Client) Create(ctx context.Context, opts CreateOptions) error {
+// is the Substrate atespace the actor and template live in. It returns the
+// actor as the control plane stored it.
+func (c *Client) Create(ctx context.Context, opts CreateOptions) (*ateapipb.Actor, error) {
 	atespace, err := opts.check()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := c.EnsureAtespace(ctx, atespace); err != nil {
-		return fmt.Errorf("ate: creating %q: %w", opts.ID, err)
+		return nil, fmt.Errorf("ate: creating %q: %w", opts.ID, err)
 	}
 	return c.CreateActor(ctx, opts)
 }
@@ -361,11 +362,12 @@ func (c *Client) Create(ctx context.Context, opts CreateOptions) error {
 // CreateActor registers a new actor from opts with one CreateActor call, in
 // an atespace the caller knows exists (EnsureAtespace): an error is that
 // call's, so a caller that retries can tell a refusal from a call cut off.
-// ID and Template are required.
-func (c *Client) CreateActor(ctx context.Context, opts CreateOptions) error {
+// ID and Template are required. It returns the actor as the control plane
+// stored it.
+func (c *Client) CreateActor(ctx context.Context, opts CreateOptions) (*ateapipb.Actor, error) {
 	atespace, err := opts.check()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	actor := &ateapipb.Actor{
 		Metadata: &ateapipb.ResourceMetadata{
@@ -380,11 +382,11 @@ func (c *Client) CreateActor(ctx context.Context, opts CreateOptions) error {
 	if len(opts.WorkerSelector) > 0 {
 		actor.WorkerSelector = &ateapipb.Selector{MatchLabels: maps.Clone(opts.WorkerSelector)}
 	}
-	if _, err := c.control.CreateActor(ctx, &ateapipb.CreateActorRequest{Actor: actor}); err != nil {
-		return fmt.Errorf("ate: creating %q: %w", opts.ID, wrapGRPCError(err))
+	created, err := c.control.CreateActor(ctx, &ateapipb.CreateActorRequest{Actor: actor})
+	if err != nil {
+		return nil, fmt.Errorf("ate: creating %q: %w", opts.ID, wrapGRPCError(err))
 	}
-
-	return nil
+	return created, nil
 }
 
 // Get retrieves the actor with ID in atespace from the control plane.
@@ -415,25 +417,46 @@ func (c *Client) ListAll(ctx context.Context) ([]*ateapipb.Actor, error) {
 	return c.listActors(ctx, "")
 }
 
+// ListPage returns one page of the actors in atespace and the control
+// plane's token for the next page, empty on the last one. pageToken is the
+// token of the previous page, empty for the first. If atespace is empty,
+// DefaultAtespace is used.
+func (c *Client) ListPage(ctx context.Context, atespace string, pageSize int32, pageToken string) ([]*ateapipb.Actor, string, error) {
+	if atespace == "" {
+		atespace = DefaultAtespace
+	}
+	return c.listActorsPage(ctx, atespace, pageSize, pageToken)
+}
+
 // listActors lists the actors of atespace, or of every atespace when it is
 // empty.
 func (c *Client) listActors(ctx context.Context, atespace string) ([]*ateapipb.Actor, error) {
 	var actors []*ateapipb.Actor
 	token := ""
 	for {
-		resp, err := c.control.ListActors(ctx, &ateapipb.ListActorsRequest{
-			Atespace: atespace,
-			Options:  &ateapipb.ListOptions{PageToken: token, PageSize: 1000},
-		})
+		page, next, err := c.listActorsPage(ctx, atespace, 1000, token)
 		if err != nil {
-			return nil, fmt.Errorf("ate: listing actors in %q: %w", atespace, wrapGRPCError(err))
+			return nil, err
 		}
-		actors = append(actors, resp.GetActors()...)
-		token = resp.GetNextPageToken()
+		actors = append(actors, page...)
+		token = next
 		if token == "" {
 			return actors, nil
 		}
 	}
+}
+
+// listActorsPage reads one page of the actors of atespace, or of every
+// atespace when it is empty.
+func (c *Client) listActorsPage(ctx context.Context, atespace string, pageSize int32, pageToken string) ([]*ateapipb.Actor, string, error) {
+	resp, err := c.control.ListActors(ctx, &ateapipb.ListActorsRequest{
+		Atespace: atespace,
+		Options:  &ateapipb.ListOptions{PageToken: pageToken, PageSize: pageSize},
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("ate: listing actors in %q: %w", atespace, wrapGRPCError(err))
+	}
+	return resp.GetActors(), resp.GetNextPageToken(), nil
 }
 
 // ListAtespaces returns every atespace, following the control plane's

@@ -7,6 +7,10 @@
     "go": "Get",
     "python": "get"
   },
+  "ListEnvironments": {
+    "go": "List",
+    "python": "list_environments"
+  },
   "SuspendEnvironment": {
     "go": "Suspend",
     "python": "suspend"

@@ -36,6 +36,7 @@ __all__ = [
     "Signal",
     "Template",
     "EnvironmentInfo",
+    "EnvironmentPage",
     "ProcessInfo",
     "ProcessOutput",
     "ShellResult",
@@ -147,6 +148,22 @@ class EnvironmentInfo:
     # The per-environment worker selector it was created with; {} when none.
     # Left out of the hash so EnvironmentInfo stays hashable, as before.
     worker_selector: Mapping[str, str] = field(default_factory=dict, hash=False)
+    # When Substrate created the environment's actor, in UTC; None when the
+    # server did not report it.
+    create_time: datetime | None = None
+
+
+@dataclass(frozen=True)
+class EnvironmentPage:
+    """One page of ``Client.list_environments``.
+
+    ``next_page_token`` is "" on the last page. With a status filter a page
+    can hold fewer environments than the page size, or none, while the token
+    is set.
+    """
+
+    environments: tuple[EnvironmentInfo, ...]
+    next_page_token: str = ""
 
 
 class GoldenSnapshotState(enum.IntEnum):
@@ -305,6 +322,9 @@ def _environment_info_from_pb(pb: env_pb2.Environment) -> EnvironmentInfo:
         status=EnvironmentStatus(pb.status),
         node=pb.node,
         worker_selector=dict(pb.worker_selector),
+        create_time=(
+            pb.create_time.ToDatetime(tzinfo=timezone.utc) if pb.HasField("create_time") else None
+        ),
     )
 
 

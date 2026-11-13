@@ -168,6 +168,18 @@ both `node` and `worker_selector`.
 Accepted risk for now: this hardening is not needed for RL at the moment. Revisit it before the
 API serves callers other than trusted RL jobs.
 
+## Listing environments
+
+`ListEnvironments` returns the environments of one atespace: id, template, status, node, worker
+selector and create time, the fields `GetEnvironment` reports plus `Environment.create_time`.
+`ate-env-api` reads them with Substrate's `ListActors` on that atespace under its own identity.
+The `editor` role of the access policy already allows that call, thus the RPC adds no privilege.
+
+| Threat | Current mitigation | Gap |
+|---|---|---|
+| A caller enumerates the environments of other callers | The token (Boundary 1). The access policy limits `ate-env-api` to its atespaces, thus the list reaches no other atespace. | Each token holder reads the id, template, status, node and create time of every environment in every atespace that `ate-env-api` can use. Before, a caller had to know an id to read these with `GetEnvironment`. With an id, a token holder can already run commands in that environment (Boundary 1, one shared token). |
+| Large responses | One call reads at most 1000 actors from Substrate (`MaxListPageSize`), 100 by default, and holds one page in memory. | No rate limit, as for the other RPCs. |
+
 ## Client tracing
 
 The Python client emits OpenTelemetry spans when `TracerConfig(enable_tracing=True)` is set. The

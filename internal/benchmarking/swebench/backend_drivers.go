@@ -351,7 +351,7 @@ func (b *DirectSubstrateBackend) Create(ctx context.Context, id, image string) (
 	if err != nil {
 		return nil, fmt.Errorf("create %s: %w", id, err)
 	}
-	if err := b.client.Create(ctx, ate.CreateOptions{
+	if _, err := b.client.Create(ctx, ate.CreateOptions{
 		ID:       id,
 		Atespace: b.atespace,
 		Template: tmplName,
