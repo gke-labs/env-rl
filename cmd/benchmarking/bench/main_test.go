@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1089,5 +1090,216 @@ jobs:
 	coldRep, _ := os.ReadFile(filepath.Join(coldDir, "report.json"))
 	if !strings.Contains(string(coldRep), `"valid": true`) || !strings.Contains(string(coldRep), "no prewarm events and no pre-flight coverage") {
 		t.Errorf("cold report validity:\n%s", coldRep)
+	}
+}
+
+// readEventFiles reads several event files, one without a final newline,
+// keeps the ttfic and wake events for the restore join, and gives the span of
+// the timed events.
+func TestReadEventFilesWindowsSpanAndErrors(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.jsonl")
+	b := filepath.Join(dir, "b.jsonl")
+	if err := os.WriteFile(a, []byte(`{"ts":"2026-01-01T00:00:10Z","run":"r","event":"create","env":"e1","dur_ms":1000,"ok":true}
+{"ts":"2026-01-01T00:00:12Z","run":"r","event":"ttfic","env":"e1","dur_ms":3000,"ok":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte(`{"ts":"2026-01-01T00:00:20Z","run":"r","event":"wake","env":"e2","dur_ms":500,"ok":false}
+{"ts":"2026-01-01T00:01:00Z","run":"r","event":"run","dur_ms":60000,"ok":true}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	at := func(sec int) time.Time { return time.Date(2026, 1, 1, 0, 0, sec, 0, time.UTC) }
+	var windows swebench.RestoreWindows
+	rep, span, err := readEventFiles([]string{a, b}, &windows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, ok := rep.StatFor(swebench.EventCreate, ""); !ok || st.Count != 1 || rep.DistinctEnvs != 2 {
+		t.Fatalf("report: create stat %+v (ok=%v), %d environments, want 1 create and 2 environments", st, ok, rep.DistinctEnvs)
+	}
+	rb := windows.Join(map[string][]swebench.RestoreTiming{
+		"e1": {{Time: at(11), Actor: "e1", Phases: map[string]float64{"total": 1}}},
+		"e2": {{Time: at(20), Actor: "e2", Phases: map[string]float64{"total": 0.2}}},
+	})
+	if rb.First.Restores != 1 || rb.Wakes.Restores != 1 || rb.Wakes.FailedEvents != 1 || rb.First.Outside == nil || rb.First.Outside.MaxMS != 2000 {
+		t.Fatalf("join %+v, want the ttfic of e1 (3000 ms, ok) and the failed wake of e2", rb)
+	}
+	if !span.ok() || !span.start.Equal(at(9)) || !span.end.Equal(at(20)) {
+		t.Fatalf("span %+v, want %v to %v: the run event is not a timed event", span, at(9), at(20))
+	}
+
+	// With no timed event the span is that of all events.
+	only := filepath.Join(dir, "only.jsonl")
+	if err := os.WriteFile(only, []byte(`{"ts":"2026-01-01T00:01:00Z","run":"r","event":"run","dur_ms":60000,"ok":true}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, span, err = readEventFiles([]string{only}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !span.ok() || !span.start.Equal(at(0)) || !span.end.Equal(at(60)) {
+		t.Fatalf("span of a run event alone: %+v", span)
+	}
+
+	// Each file that cannot be read whole is an error that names it once.
+	bad := filepath.Join(dir, "bad.jsonl")
+	if err := os.WriteFile(bad, []byte("{not json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// One line above the 16 MB limit, after a line that parses.
+	long := filepath.Join(dir, "long.jsonl")
+	if err := os.WriteFile(long, []byte(`{"ts":"2026-01-01T00:00:10Z","run":"r","event":"create","env":"e1","dur_ms":1000,"ok":true}
+{"ts":"2026-01-01T00:00:11Z","run":"r","event":"step","env":"e1","dur_ms":1000,"ok":true,"tail":"`+strings.Repeat("x", 17<<20)+"\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	isDir := filepath.Join(dir, "dir.jsonl")
+	if err := os.Mkdir(isDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ path, want string }{
+		{bad, "parse event"},
+		{long, "token too long"},
+		{isDir, "is a directory"},
+		{filepath.Join(dir, "absent.jsonl"), "no such file"},
+	} {
+		_, _, err := readEventFiles([]string{a, tc.path}, nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Count(err.Error(), tc.path) != 1 {
+			t.Errorf("%s: error %v, want one with %q that names the file once", filepath.Base(tc.path), err, tc.want)
+		}
+	}
+}
+
+// Only a bundle with a restore file keeps the ttfic and wake events.
+func TestNewRestoreWindowsNeedsARestoreFile(t *testing.T) {
+	dir := t.TempDir()
+	if w := newRestoreWindows(dir); w != nil {
+		t.Fatal("no restore file: want nil")
+	}
+	for _, name := range []string{"atelet_restores.jsonl", "restore_timings.jsonl"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if w := newRestoreWindows(dir); w != nil {
+			t.Fatalf("empty %s: want nil", name)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if w := newRestoreWindows(dir); w == nil {
+			t.Fatalf("%s with a record: want the windows", name)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// bench report -dest on two shard files, the first without a final newline,
+// reads every line of both and writes the report, the restores block and the
+// run window from them.
+func TestReportDestTwoShardsOneWithoutFinalNewline(t *testing.T) {
+	dir := t.TempDir()
+	baseT := time.Date(2026, 11, 6, 20, 0, 0, 0, time.UTC)
+	writeTwoShardEvents(t, dir, baseT, "example.com/r2e@sha256:"+strings.Repeat("1", 64), "example.com/swe@sha256:"+strings.Repeat("2", 64))
+	first := filepath.Join(dir, "events", "r2e.jsonl")
+	raw, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(first, bytes.TrimRight(raw, "\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONLRows(t, filepath.Join(dir, "atelet_restores.jsonl"), []any{
+		ateletRestoreLine("bkl-a1-r2e-0", baseT.Add(260*time.Millisecond), map[string]float64{"total": 0.145}, ""),
+		ateletRestoreLine("bkl-a1-swe-0", baseT.Add(290*time.Millisecond), map[string]float64{"total": 0.160}, ""),
+	})
+
+	var outBuf, errBuf bytes.Buffer
+	if err := reportCmd([]string{"-dest", dir}, &outBuf, &errBuf); err != nil {
+		t.Fatalf("reportCmd failed: %v (stderr=%s)", err, errBuf.String())
+	}
+	rawRep, err := os.ReadFile(filepath.Join(dir, "report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep swebench.Report
+	if err := json.Unmarshal(rawRep, &rep); err != nil {
+		t.Fatalf("unmarshal report.json: %v", err)
+	}
+	// The last line of each file is its run event.
+	if rep.Tasks != 2 || rep.DistinctEnvs != 2 || len(rep.Runs) != 2 {
+		t.Fatalf("report.json: tasks=%d distinct_envs=%d runs=%v, want 2 tasks, 2 environments and the runs of both shards", rep.Tasks, rep.DistinctEnvs, rep.Runs)
+	}
+	if rep.Restores == nil || rep.Restores.First.Restores != 2 {
+		t.Fatalf("report.json: restores = %+v, want 2 first starts", rep.Restores)
+	}
+	// The timed events run from baseT+50ms to baseT+1150ms.
+	rw, err := swebench.ReadRunWindow(filepath.Join(dir, "run_window.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rw.StartTS != "2026-11-06T20:00:00Z" || rw.EndTS != "2026-11-06T20:00:01Z" {
+		t.Fatalf("run_window.json: %s to %s, want the span of the events", rw.StartTS, rw.EndTS)
+	}
+	for _, name := range []string{"report.md", "restore_timings.jsonl"} {
+		if !fileExistsNonEmpty(filepath.Join(dir, name)) {
+			t.Errorf("%s is missing or empty", name)
+		}
+	}
+	if outBuf.Len() == 0 {
+		t.Error("no text report on stdout")
+	}
+}
+
+// bench report -dest reads more event files than the process may have open,
+// as it opens one at a time.
+func TestReportDestMoreShardsThanOpenFileLimit(t *testing.T) {
+	const limit, shards = 128, 160
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "events"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range shards {
+		line := fmt.Sprintf(`{"ts":"2026-01-01T00:00:10Z","run":"r","event":"create","env":"e%d","dur_ms":1000,"ok":true}`+"\n", i)
+		if err := os.WriteFile(filepath.Join(dir, "events", fmt.Sprintf("w%04d.jsonl", i)), []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A restore file, so the ttfic and wake events are kept too.
+	writeJSONLRows(t, filepath.Join(dir, "atelet_restores.jsonl"), []any{
+		ateletRestoreLine("e0", time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC), map[string]float64{"total": 0.1}, ""),
+	})
+
+	var orig syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &orig); err != nil {
+		t.Fatal(err)
+	}
+	low := orig
+	low.Cur = min(orig.Cur, limit)
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &low); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &orig); err != nil {
+			t.Errorf("restore RLIMIT_NOFILE: %v", err)
+		}
+	})
+
+	var outBuf, errBuf bytes.Buffer
+	if err := reportCmd([]string{"-dest", dir}, &outBuf, &errBuf); err != nil {
+		t.Fatalf("reportCmd with %d event files and a limit of %d open files: %v", shards, low.Cur, err)
+	}
+	rawRep, err := os.ReadFile(filepath.Join(dir, "report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep swebench.Report
+	if err := json.Unmarshal(rawRep, &rep); err != nil {
+		t.Fatalf("unmarshal report.json: %v", err)
+	}
+	if rep.DistinctEnvs != shards {
+		t.Fatalf("report.json: distinct_envs=%d, want %d: one per event file", rep.DistinctEnvs, shards)
 	}
 }

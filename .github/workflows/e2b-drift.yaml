@@ -1,0 +1,80 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The E2B classes against the newest e2b release below 3, which uv.lock does
+# not hold (docs/plans/e2b-runtime-support, section 7, E2B-37): the unit tests
+# of integrations/e2b with the structural tests, then the Kind E2E with the
+# test of the class. Weekly, on demand, and on a pull request that changes
+# this workflow, its script or the script's tests. It is not a required check and gates no other
+# pull request: a new upstream release must not fail an unrelated change. A
+# failed run names the e2b version; the fix is a change to the classes or to
+# the bounds in integrations/e2b/pyproject.toml. Actions are pinned by commit
+# SHA (version in the trailing comment), as the organization's workflow
+# security scan requires.
+name: e2b-drift
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/e2b-drift.yaml
+      - hack/ci/e2b-drift.sh
+      - hack/ci/test_e2b_drift.py
+  schedule:
+    # Weekly on Monday at 07:00 UTC, after ci-devenv.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  newest-e2b:
+    name: E2B classes on the newest e2b
+    runs-on: ubuntu-24.04 # pinned on purpose: ubuntu-latest now resolves to 26.04; bump deliberately
+    timeout-minutes: 40
+    steps:
+      # As in the Kind E2E job of ci.yaml: the hosted runner's root disk fills
+      # during the Substrate install without this.
+      - name: Free runner disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/cache-go-and-substrate
+        with:
+          mode: restore
+          scope: e2e
+      # The script's own tests (a relative environment path, a newer
+      # ate-env-rl on an index, a caller's E2E variables). They install from
+      # PyPI two times, thus only a pull request that changes the script, its
+      # tests or this workflow runs them.
+      - name: Test the drift script
+        if: github.event_name == 'pull_request'
+        env:
+          E2B_DRIFT_TEST: "1"
+        run: python3 hack/ci/test_e2b_drift.py
+      - name: Run the E2B tests on the newest e2b
+        run: hack/ci/e2b-drift.sh

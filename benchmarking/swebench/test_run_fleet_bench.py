@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -179,6 +180,13 @@ def test_unit_helpers_duration_graders_and_labels(tmp_path, monkeypatch):
         rfb.resolve_auth_token(str(empty_tok))
 
 
+def test_loader_label_keys_are_the_go_loaders():
+    src = (_REPO_ROOT / "internal" / "benchmarking" / "swebench" / "run.go").read_text(encoding="utf-8")
+    keys = re.search(r"var LoaderLabelKeys = \[\]string\{(.*?)\n\}", src, re.S)
+    assert keys, "run.go has no LoaderLabelKeys"
+    assert rfb.LOADER_LABEL_KEYS == frozenset(re.findall(r'"([^"]+)"', keys.group(1)))
+
+
 def test_all_four_strategies_and_fleet_report_outputs(tmp_path):
     r2e_manifest = _write_r2e_manifest(tmp_path / "r2e-6.jsonl", count=6)
 
@@ -308,8 +316,9 @@ def test_swebench_gold_smoke_wake_retry_and_validation(tmp_path):
         rfb.run_benchmark(["--dataset", str(swe_manifest), "--strategy=naive", "--window-size=2", "--dry-run"])
     with pytest.raises(ValueError, match="single-pass"):
         rfb.run_benchmark(["--dataset", str(swe_manifest), "--mode=steps", "--steps=2", "--dry-run"])
-    with pytest.raises(ValueError, match="loader records that key itself"):
-        rfb.run_benchmark(["--dataset", str(swe_manifest), "--label=width=10", "--dry-run"])
+    for key in ("width", "placement", "domain_width"):
+        with pytest.raises(ValueError, match="loader records that key itself"):
+            rfb.run_benchmark(["--dataset", str(swe_manifest), f"--label={key}=10", "--dry-run"])
     with pytest.raises(ValueError, match="does not read it"):
         rfb.run_benchmark(["--dataset", str(swe_manifest), "--trajectory=swebench-gold", "--set=UNUSED=1", "--dry-run"])
 

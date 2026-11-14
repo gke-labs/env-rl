@@ -1273,6 +1273,48 @@ func TestEnvBackendCreateFollowsThePlacementPlan(t *testing.T) {
 	}
 }
 
+func TestEnvBackendDomainForAndCreateInDomain(t *testing.T) {
+	api := &fakeAPI{}
+	b := newFakeBackend(t, api)
+	WithPlacement(twoDomainPlan())(b)
+	other := "registry.example/swebench/z@sha256:" + strings.Repeat("c", 64)
+	// b is in d0 and d1: replay k goes to the k-th, wrapping; a is in d0
+	// only; the plan does not place the other image.
+	for _, tc := range []struct {
+		image string
+		k     int
+		want  string
+	}{{pfImgB, 0, "d0"}, {pfImgB, 1, "d1"}, {pfImgB, 2, "d0"}, {pfImgB, 3, "d1"}, {pfImgA, 1, "d0"}, {other, 0, ""}, {pfImgB, -1, ""}} {
+		if got := b.DomainFor(tc.image, tc.k); got != tc.want {
+			t.Errorf("DomainFor(%s, %d) = %q, want %q", tc.image, tc.k, got, tc.want)
+		}
+	}
+	if got := newFakeBackend(t, &fakeAPI{}).DomainFor(pfImgB, 0); got != "" {
+		t.Errorf("DomainFor without a plan = %q, want none", got)
+	}
+
+	ctx := context.Background()
+	for _, d := range []string{"d0", "d1"} {
+		id := "b-" + d
+		if _, err := b.CreateInDomain(ctx, id, pfImgB, d); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := api.selectors[id], map[string]string{"ate-env/domain": d}; !reflect.DeepEqual(got, want) {
+			t.Errorf("create of b in %s sent selector %v, want %v", d, got, want)
+		}
+	}
+	for _, tc := range []struct{ image, domain, err string }{
+		{pfImgA, "d1", "does not put"}, {other, "d0", "does not put"}, {pfImgB, "d9", "has no domain"}, {pfImgB, "", "has no domain"},
+	} {
+		if _, err := b.CreateInDomain(ctx, "refused", tc.image, tc.domain); err == nil || !strings.Contains(err.Error(), tc.err) {
+			t.Errorf("CreateInDomain(%s, %q): err = %v, want %q", tc.image, tc.domain, err, tc.err)
+		}
+	}
+	if len(api.created) != 2 {
+		t.Errorf("created %v, want only the two creates in a planned domain", api.created)
+	}
+}
+
 func TestNewBackendDriverRefusesPlacementOffTheEnvAPI(t *testing.T) {
 	plan := twoDomainPlan()
 	for _, opts := range []BackendDriverOptions{

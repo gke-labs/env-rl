@@ -223,7 +223,7 @@ images that run as root. Group V of the criteria has the results that are criter
 | later        | Environment time to live: API field, enforcement, `timeout` and `set_timeout`       | 2     |
 | later        | Environment labels and `ListEnvironments`: `metadata`, `Sandbox.list`               | 2     |
 | later        | Hostname form on the port proxy: `get_host`, signed file URLs                       | 2     |
-| later        | The scheduled drift job (section 7)                                                 | 2     |
+| #390         | The scheduled drift job (section 7)                                                 | 2     |
 
 The core pull request for the wake hold is #384, and its issue is #382: the header is
 `X-Env-Wake-Wait: <seconds>`, capped by `-port-proxy-wake-wait-cap`.
@@ -242,9 +242,11 @@ The core pull request for the wake hold is #384, and its issue is #382: the head
 
 ## 7. Drift check for a new `e2b` release
 
-A scheduled CI job, planned and not built (E2B-37): each week, against the newest `e2b` below 3, it
-runs the structural tests (public names only; the refuse-by-default guards, E2B-28) and the Kind
-test of the class (E2B-27).
+A scheduled CI job (E2B-37, `.github/workflows/e2b-drift.yaml` and `hack/ci/e2b-drift.sh`, #390):
+each week, against the newest `e2b` below 3, it runs the unit tests of `integrations/e2b`, which
+hold the structural tests (public names only; the refuse-by-default guards, E2B-28), and the Kind
+test of the class (E2B-27). It is not a required check: a new `e2b` release must not fail an
+unrelated pull request.
 
 Manual, because a job cannot do it:
 

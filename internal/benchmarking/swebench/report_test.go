@@ -20,7 +20,10 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -557,6 +560,7 @@ func TestPool(t *testing.T) {
 	}
 	same := map[string]string{"mode": "eval", "width": "2", "commit": "aaa"}
 	other := map[string]string{"mode": "eval", "width": "2", "commit": "bbb"}
+	domain := map[string]string{"mode": "eval", "width": "2", "domain_width": "2"}
 	rep, err := Pool([][]Event{run("r1", same), run("r2", other)})
 	if err != nil {
 		t.Fatal(err)
@@ -573,6 +577,8 @@ func TestPool(t *testing.T) {
 		{"run id twice", [][]Event{run("r1", same), run("r1", same)}, `rep 2 repeats run id "r1" of rep 1`},
 		{"other workload", [][]Event{run("r1", same), run("r2", map[string]string{"mode": "eval", "width": "3"})}, `rep 2 differs from rep 1 in width ("3", "2")`},
 		{"no loader labels", [][]Event{run("r1", same), run("r2", nil)}, `rep 2 (run "r2") has no loader labels`},
+		{"other domain width", [][]Event{run("r1", domain), run("r2", map[string]string{"mode": "eval", "width": "2", "domain_width": "3"})}, `rep 2 differs from rep 1 in domain_width ("3", "2")`},
+		{"no domain width", [][]Event{run("r1", domain), run("r2", same)}, `rep 2 differs from rep 1 in domain_width ("", "2")`},
 		{"two runs in one file", [][]Event{append(run("r1", same), run("r2", same)...)}, "rep 1 holds 2 run events"},
 		{"other -set value", [][]Event{run("r1", same), run("r2", map[string]string{"mode": "eval", "width": "2", "set.READ_FILES": "10"})}, `rep 2 differs from rep 1 in set.READ_FILES ("10", "")`},
 	} {
@@ -684,6 +690,39 @@ func TestActiveVsPausedSandboxesAndConcurrencyCap(t *testing.T) {
 	}
 	if rep.LifecyclePolicy == nil || rep.LifecyclePolicy.Mode != "warm_pool" || rep.LifecyclePolicy.ParkMode != "suspend-sync" || rep.LifecyclePolicy.PerStepWarming != "wake_on_demand" {
 		t.Fatalf("unexpected LifecyclePolicy for warm run: %+v", rep.LifecyclePolicy)
+	}
+}
+
+// With no task, barrier or pool size, the two peaks come from the counts that
+// markEnvState keeps: an environment that leaves a state no longer counts in it.
+func TestPeakActiveAndParkedSandboxesAcrossTransitions(t *testing.T) {
+	t0 := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	var events []Event
+	add := func(event, env string) {
+		events = append(events, Event{Time: t0.Add(time.Duration(len(events)) * time.Second), RunID: "r", Event: event, Env: env, DurMS: 10, OK: true})
+	}
+	for _, env := range []string{"e1", "e2", "e3"} {
+		add(EventCreate, env) // active 3
+	}
+	add(EventSuspend, "e1")
+	add(EventSuspend, "e2") // active 1, parked 2
+	for range 3 {
+		add(EventWake, "e1") // active 2, parked 1
+		add(EventSuspend, "e1")
+		add(EventWake, "e2")
+		add(EventSuspend, "e2")
+	}
+	add(EventDelete, "e1") // parked 1
+	add(EventDelete, "e3") // active 0
+	add(EventCreate, "e4")
+	add(EventCreate, "e5") // active 2
+	add(EventSuspend, "e4")
+	add(EventDelete, "e2")
+	add(EventDelete, "e4")
+	add(EventDelete, "e5")
+	rep := Build(events)
+	if rep.PeakActiveSandboxes != 3 || rep.PeakParkedSandboxes != 2 {
+		t.Fatalf("peak active=%d parked=%d, want 3 and 2", rep.PeakActiveSandboxes, rep.PeakParkedSandboxes)
 	}
 }
 
@@ -890,5 +929,137 @@ func TestStatSourceIsSet(t *testing.T) {
 	}
 	if rep.Stats[0].Source != "events" {
 		t.Errorf("expected source to be events, got %v", rep.Stats[0].Source)
+	}
+}
+
+// loadOrSummarizeWhole is LoadOrSummarizeReport as it was before it streamed
+// events files: it reads the whole file.
+func loadOrSummarizeWhole(path string) (*Report, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '{' && !bytes.Contains(trimmed, []byte("\n{")) {
+		var rep Report
+		if err := json.Unmarshal(trimmed, &rep); err == nil && (len(rep.Stats) > 0 || rep.Tasks > 0 || len(rep.Jobs) > 0) {
+			NormalizeLegacyReport(&rep)
+			return &rep, nil
+		}
+	}
+	return Summarize(bytes.NewReader(raw))
+}
+
+// LoadOrSummarizeReport gives the report or the error that reading the whole
+// file gave, for a report.json and for an events file.
+func TestLoadOrSummarizeReportMatchesWholeFileRead(t *testing.T) {
+	t0 := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	events := []Event{
+		{Time: t0.Add(1 * time.Second), RunID: "r", Event: EventCreate, Env: "e1", DurMS: 50, OK: true},
+		{Time: t0.Add(2 * time.Second), RunID: "r", Event: EventTask, Env: "e1", DurMS: 900, OK: true, Reward: intp(1)},
+		{Time: t0.Add(3 * time.Second), RunID: "r", Event: EventTask, Env: "e1", DurMS: 800, OK: false, Err: "exit 1"},
+		{Time: t0.Add(4 * time.Second), RunID: "r", Event: EventRun, Name: "eval", DurMS: 4000, OK: true, Count: 2},
+	}
+	var lines []string
+	for _, e := range events {
+		b, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, string(b))
+	}
+	jsonl := strings.Join(lines, "\n")
+	rep := Build(events)
+	rep.HardwareCost = &HardwareCostSummary{TotalSandboxes: 1}
+	pretty, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oneLine, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const loaded, summarized = "post-audit-v2", "post-audit-v1"
+	cases := []struct {
+		name, content string
+		era           string // the report's schema era; "" for an error
+		tasks         int
+	}{
+		{"report.json, pretty-printed", string(pretty) + "\n", loaded, 2},
+		{"report.json, one line", string(oneLine), loaded, 2},
+		{"report.json, one line between blank lines", "\n \n" + string(oneLine) + "\n\n", loaded, 2},
+		{"legacy report", `{"run":"old","tasks":200,"failed":3,"stats":[{"event":"ttfi","count":200}]}` + "\n", "pre-audit-legacy", 200},
+		{"events, final newline", jsonl + "\n", summarized, 2},
+		{"events, no final newline", jsonl, summarized, 2},
+		{"events, CRLF", strings.ReplaceAll(jsonl, "\n", "\r\n") + "\r\n", summarized, 2},
+		{"events, leading blank lines", "\n  \n\n" + jsonl + "\n", summarized, 2},
+		{"events, leading empty lines", "\n\n" + jsonl + "\n", summarized, 2},
+		{"events, second line indented", lines[0] + "\n " + lines[1] + "\n", summarized, 1},
+		{"one event", lines[1] + "\n", summarized, 1},
+		{"one event, no final newline", lines[1], summarized, 1},
+		{"a JSON object that is no report", `{"foo":1}` + "\n", summarized, 0},
+		{"empty file", "", summarized, 0},
+		{"blank lines only", "\n \n", summarized, 0},
+		{"events, third line does not parse", lines[0] + "\n" + lines[1] + "\n{not json\n" + lines[2] + "\n", "", 0},
+		{"events, second line does not parse", lines[0] + "\n{not json\n", "", 0},
+		{"events, first line does not parse", "not json\n" + lines[0] + "\n", "", 0},
+	}
+	dir := t.TempDir()
+	for i, tc := range cases {
+		path := filepath.Join(dir, strconv.Itoa(i))
+		if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, gotErr := LoadOrSummarizeReport(path)
+		want, wantErr := loadOrSummarizeWhole(path)
+		if (gotErr == nil) != (wantErr == nil) || gotErr != nil && gotErr.Error() != wantErr.Error() {
+			t.Errorf("%s: error %v, want %v", tc.name, gotErr, wantErr)
+			continue
+		}
+		if (gotErr != nil) != (tc.era == "") {
+			t.Errorf("%s: error %v, want era %q", tc.name, gotErr, tc.era)
+			continue
+		}
+		if gotErr != nil {
+			continue
+		}
+		if got.SchemaEra != tc.era || got.Tasks != tc.tasks {
+			t.Errorf("%s: era %q with %d tasks, want %q with %d", tc.name, got.SchemaEra, got.Tasks, tc.era, tc.tasks)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: the report differs from that of the whole-file read", tc.name)
+		}
+	}
+	for _, path := range []string{filepath.Join(dir, "absent"), dir} {
+		_, gotErr := LoadOrSummarizeReport(path)
+		_, wantErr := loadOrSummarizeWhole(path)
+		if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() {
+			t.Errorf("%s: error %v, want %v", path, gotErr, wantErr)
+		}
+	}
+}
+
+// LoadOrSummarizeReport does not hold an events file in memory: on an 8 MB
+// file, nearly all of it blank lines, it allocates a small part of the size.
+func TestLoadOrSummarizeReportStreamsAnEventsFile(t *testing.T) {
+	const size = 8 << 20
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	event := `{"ts":"2026-10-27T00:00:01Z","run":"r","event":"create","env":"e1","dur_ms":50,"ok":true}` + "\n"
+	blank := strings.Repeat(" ", 4095) + "\n"
+	if err := os.WriteFile(path, []byte(event+event+strings.Repeat(blank, size/len(blank))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	rep, err := LoadOrSummarizeReport(path)
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, ok := rep.StatFor(EventCreate, ""); !ok || st.Count != 2 {
+		t.Fatalf("create stat %+v (ok=%v), want 2 events", st, ok)
+	}
+	if got := after.TotalAlloc - before.TotalAlloc; got > size/2 {
+		t.Fatalf("allocated %d bytes for a file of %d: the file was held in memory", got, size)
 	}
 }

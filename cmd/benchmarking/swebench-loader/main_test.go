@@ -1122,6 +1122,19 @@ func TestRunCmdPlacementFlag(t *testing.T) {
 	if err == nil {
 		t.Error("a missing plan file was accepted")
 	}
+	err = runCmd([]string{"-dataset", manifest, "-dry-run", "-domain-width", "2"})
+	if err == nil || !strings.Contains(err.Error(), "-domain-width needs") {
+		t.Errorf("-domain-width without -placement: err = %v, want a refusal", err)
+	}
+	for _, n := range []string{"2", "-1"} {
+		err = runCmd([]string{"-dataset", manifest, "-dry-run", "-mode", "steps", "-placement", full, "-domain-width", n})
+		if err == nil || !strings.Contains(err.Error(), "domain width applies to eval mode") {
+			t.Errorf("-domain-width %s in steps mode: err = %v, want a refusal", n, err)
+		}
+	}
+	if err := runCmd([]string{"-dataset", manifest, "-dry-run", "-placement", full, "-domain-width", "2"}); err != nil {
+		t.Errorf("-dry-run with -placement and -domain-width: %v", err)
+	}
 
 	// With the test backend the run goes through and the run event carries
 	// the plan's name.

@@ -962,6 +962,7 @@ func runCmd(args []string) (retErr error) {
 		width            = fs.Int("width", 50, "Most tasks in flight at once.")
 		arrivalRate      = fs.Float64("arrival-rate", 0, "open-loop: Poisson task arrival rate in tasks/sec.")
 		tasksPerImage    = fs.Int("tasks-per-image", 1, "eval: replays per image.")
+		domainWidth      = fs.Int("domain-width", 0, "eval with -placement: run this many tasks at once in each placement domain, a closed loop per domain, instead of -width across the run; replay k of an image goes to the k-th of its domains. 0 disables.")
 		rollouts         = fs.Int("rollouts", 2, "steps: environments per image.")
 		steps            = fs.Int("steps", 8, "steps: training steps.")
 		park             = fs.String("park", string(swebench.ParkSuspend), "steps: what happens between steps. suspend and suspend-sync are durable: the call returns once the snapshot is in object storage. suspend-async is local: the call returns once the snapshot is on the node and the upload goes on in the background. fork replaces each environment per step (through ate-env-api a new environment created from the image; with -access direct a fork of its base) and parks it locally. delete deletes, and the next step creates again. none keeps the fleet running. Through ate-env-api a local suspend needs a server that serves suspend_mode, which the run checks before it starts.")
@@ -1198,6 +1199,7 @@ func runCmd(args []string) (retErr error) {
 		Width:         *width,
 		ArrivalRate:   *arrivalRate,
 		TasksPerImage: *tasksPerImage,
+		DomainWidth:   *domainWidth,
 		Rollouts:      *rollouts,
 		Steps:         *steps,
 		Park:          swebench.Park(*park),
@@ -1236,6 +1238,10 @@ func runCmd(args []string) (retErr error) {
 			return fmt.Errorf("-placement %s neither places nor lists as unplaced %d of the %d selected images (first: %s): plan them, or run without -placement", *placementPath, len(missing), len(selected), missing[0])
 		}
 		log.Info("placement", slog.String("plan", *placementPath), slog.Int("images", len(placement.Images)), slog.Int("domains", len(placement.Domains)), slog.Int("unplaced", len(placement.Unplaced)))
+	}
+	// ValidateConfig above refused it outside eval mode.
+	if *domainWidth > 0 && *placementPath == "" {
+		return fmt.Errorf("-domain-width needs -placement, the plan that names the domains")
 	}
 	if *preflightFlag && *placementPath == "" {
 		return fmt.Errorf("-preflight needs -placement, the plan to warm the nodes from")

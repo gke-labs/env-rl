@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -862,23 +863,15 @@ func reportFromArtifactDir(destDir, jsonOut string, activeScopes []schema.Teleme
 		return err
 	}
 	sort.Strings(matches)
-	var combined bytes.Buffer
-	for _, m := range matches {
-		b, err := os.ReadFile(m)
-		if err != nil {
-			return err
-		}
-		combined.Write(b)
-		if len(b) > 0 && b[len(b)-1] != '\n' {
-			combined.WriteByte('\n')
-		}
-	}
-	rawCombined := combined.Bytes()
-	rep, err := swebench.Summarize(bytes.NewReader(rawCombined))
+	// The event files are streamed once. Holding them and every parsed event
+	// in memory takes several times their size, which a run with tens of
+	// millions of events does not have. Only a bundle with a restore file has
+	// a reader for the ttfic and wake events, so only then are they kept.
+	windows := newRestoreWindows(destDir)
+	rep, evSpan, err := readEventFiles(matches, windows)
 	if err != nil {
 		return err
 	}
-	parsedEvents, parsedEventsErr := swebench.ReadEvents(bytes.NewReader(rawCombined))
 	// atelet_restores.jsonl, the raw harvest, comes first: it keeps the failed
 	// records and every phase, which the derived restore_timings.jsonl drops,
 	// and a reused artifact directory can hold a restore_timings.jsonl from an
@@ -898,8 +891,8 @@ func reportFromArtifactDir(destDir, jsonOut string, activeScopes []schema.Teleme
 			continue
 		}
 		joined := false
-		if parsedEventsErr == nil {
-			if rb := swebench.JoinRestores(parsedEvents, timings); rb.First.Restores+rb.Wakes.Restores > 0 {
+		if windows != nil {
+			if rb := windows.Join(timings); rb.First.Restores+rb.Wakes.Restores > 0 {
 				rep.Restores = rb
 				joined = true
 			}
@@ -1002,11 +995,9 @@ func reportFromArtifactDir(destDir, jsonOut string, activeScopes []schema.Teleme
 			endT = *outRep.Measurements.EndTS
 		}
 	}
-	if parsedEventsErr == nil && (startT.IsZero() || endT.Sub(startT) <= 2*time.Second) {
-		if evS, evE, ok := inferEventBounds(parsedEvents); ok {
-			startT = evS
-			endT = evE
-		}
+	if evSpan.ok() && (startT.IsZero() || endT.Sub(startT) <= 2*time.Second) {
+		startT = evSpan.start
+		endT = evSpan.end
 	}
 	if err := ensureRunWindowFile(destDir, runID, clusterName, startT, endT, rep.TraceMetadata()); err != nil {
 		return fmt.Errorf("run_window.json: %w", err)
@@ -1023,35 +1014,87 @@ func reportFromArtifactDir(destDir, jsonOut string, activeScopes []schema.Teleme
 	return os.WriteFile(targetJSON, append(b, '\n'), 0o644)
 }
 
-func inferEventBounds(events []swebench.Event) (time.Time, time.Time, bool) {
-	scan := func(filterTimed bool) (time.Time, time.Time, bool) {
-		var minS, maxE time.Time
-		found := false
-		for _, ev := range events {
-			if ev.Time.IsZero() {
-				continue
-			}
-			if filterTimed && (ev.Event == swebench.EventPrewarm || ev.Event == swebench.EventRun || ev.Event == swebench.EventReap) {
-				continue
-			}
-			evStart := ev.Time
-			if ev.DurMS > 0 {
-				evStart = ev.Time.Add(-time.Duration(ev.DurMS * float64(time.Millisecond)))
-			}
-			if !found || evStart.Before(minS) {
-				minS = evStart
-			}
-			if !found || ev.Time.After(maxE) {
-				maxE = ev.Time
-			}
-			found = true
+// eventSpan is the earliest start and the latest end of the events added.
+type eventSpan struct {
+	start, end time.Time
+	found      bool
+}
+
+func (s *eventSpan) add(start, end time.Time) {
+	if !s.found || start.Before(s.start) {
+		s.start = start
+	}
+	if !s.found || end.After(s.end) {
+		s.end = end
+	}
+	s.found = true
+}
+
+func (s eventSpan) ok() bool { return s.found && s.end.After(s.start) }
+
+// readEventFiles streams the event files once, in order, with one file open
+// at a time. Every event goes into the report; the ttfic and wake events also
+// go into windows, unless it is nil. The span returned is that of the timed
+// events (all but prewarm, run and reap) when they have one, and of all
+// events otherwise. An open or read error, or a line that does not parse,
+// ends the read with that error.
+func readEventFiles(paths []string, windows *swebench.RestoreWindows) (*swebench.Report, eventSpan, error) {
+	b := swebench.NewBuilder()
+	var timed, all eventSpan
+	add := func(ev swebench.Event) {
+		b.Add(ev)
+		if windows != nil {
+			windows.Add(ev)
 		}
-		return minS, maxE, found && maxE.After(minS)
+		if ev.Time.IsZero() {
+			return
+		}
+		evStart := ev.Time
+		if ev.DurMS > 0 {
+			evStart = ev.Time.Add(-time.Duration(ev.DurMS * float64(time.Millisecond)))
+		}
+		all.add(evStart, ev.Time)
+		if ev.Event != swebench.EventPrewarm && ev.Event != swebench.EventRun && ev.Event != swebench.EventReap {
+			timed.add(evStart, ev.Time)
+		}
 	}
-	if s, e, ok := scan(true); ok {
-		return s, e, true
+	for _, p := range paths {
+		if err := scanEventFile(p, add); err != nil {
+			return nil, eventSpan{}, err
+		}
 	}
-	return scan(false)
+	if timed.ok() {
+		return b.Finish(), timed, nil
+	}
+	return b.Finish(), all, nil
+}
+
+// scanEventFile calls add for each event of the JSONL file at path. An error
+// names the file.
+func scanEventFile(path string, add func(swebench.Event)) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	err = swebench.ScanEvents(f, add)
+	var pathErr *os.PathError
+	if err == nil || errors.As(err, &pathErr) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", path, err)
+}
+
+// newRestoreWindows returns the store for the ttfic and wake events of the
+// bundle in destDir, or nil when the bundle has no restore file: only the
+// restore join reads those events.
+func newRestoreWindows(destDir string) *swebench.RestoreWindows {
+	for _, name := range []string{"atelet_restores.jsonl", "restore_timings.jsonl"} {
+		if fileExistsNonEmpty(filepath.Join(destDir, name)) {
+			return &swebench.RestoreWindows{}
+		}
+	}
+	return nil
 }
 
 func materializeRestoreTimingsJSONL(outPath string, timings map[string][]swebench.RestoreTiming) error {

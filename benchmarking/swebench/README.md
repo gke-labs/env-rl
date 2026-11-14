@@ -133,8 +133,8 @@ with a column per run: p50/p95 per event, and per step the live environments,
 tasks, failures, barrier, park and wake p50/p95. `-json` then writes the
 summaries as an array. Files go before the flags.
 
-Every run event carries labels: the loader's own (mode, width, images,
-trajectory, dataset, the shape flags, connections, delete rate, base
+Every run event carries labels: the loader's own (mode, width or domain
+width, images, trajectory, dataset, the shape flags, connections, delete rate, base
 template, exclude file, instances and the timeouts) plus any
 `run -label KEY=VALUE`, which is where the Substrate commit, the cluster and
 the arm go. A `-label` with a key the loader records itself is refused, so
@@ -202,12 +202,13 @@ flag.
 
 ## How many actors, and on which clusters
 
-Every environment the loader creates is one Substrate actor. Three flags
+Every environment the loader creates is one Substrate actor. Four flags
 set how many, and one paces their deletes:
 
 | Flag | Controls |
 |---|---|
 | `-width` | actors in flight at once; also the cap on parallel creates |
+| `-domain-width` | eval with `-placement`: actors in flight at once in each placement domain, in place of `-width`; the run has up to N times the number of domains in flight |
 | `-delete-rate` | most environment deletes per second through ate-env-api, per loader process (several loaders at once add their caps up), 200 by default; 0 removes the cap. The bucket rate-limits snapshot deletes, and a delete it refuses (429, `ResourceExhausted`) is retried with backoff for up to two minutes. The queue wait and the backoff count in the `delete` event and in the `park_s` of a `-park delete` run; the run records the cap as the `delete_rate` label |
 | `-tasks-per-image` | eval: actors created per image, each a full create, replay, delete |
 | `-rollouts` | steps: actors per image kept alive across the training steps |
@@ -488,7 +489,20 @@ After a pre-flight (step 5 above), `-placement /tmp/image-placement.json` makes
 every create carry the worker selector of one of its image's domains,
 round-robin per image, so the environments land on the nodes that already
 hold the image; images the plan left unplaced get no selector. It needs the
-ate-env API backend. `-preflight` next to `-placement` runs the pre-flight
+ate-env API backend. In eval mode `-domain-width N` next to `-placement` runs
+N tasks at a time in each placement domain, a closed loop per domain, in place
+of `-width` across the run: replay k of an image goes to the k-th of its
+domains, and a domain that falls behind keeps only its own tasks, where with
+`-width` it would collect the run's in-flight tasks. Use it to hold a set
+number of environments running in every domain. The run then has up to N
+times the number of domains in flight, and N more when the plan left some of
+its images unplaced: 19 domains at `-domain-width 24` are 456. Set
+`-connections` and the API server's database connection pool as for a
+`-width` of that total; see the warning under the flag table in
+[How many actors](#how-many-actors-and-on-which-clusters). The run event
+records `domain_width` in place of `width`, so `report -arm` pools reps
+whatever their `-width`. `-preflight` next
+to `-placement` runs the pre-flight
 (step 5, with its defaults) inside the same command before the run, writing
 `preflight-events.jsonl` and `preflight-coverage.json` next to the run's
 events (`-events-dir`, or the directory of `-out`; the directory above when
@@ -697,8 +711,8 @@ The bundle built with `bench measure -k8s` records the cluster, node pools,
 Kubernetes and Substrate versions and the loader commit; pass the arm as a
 `run -label` and record by hand what neither records: boot disk type and size,
 CPU family, workers per node, bucket region. The loader records its own flags
-itself: mode, width, images, trajectory, dataset, tasks per image or
-rollouts, steps and park, connections, delete rate, base template, exclude
+itself: mode, width or domain width, images, trajectory, dataset, tasks per
+image or rollouts, steps and park, connections, delete rate, base template, exclude
 file, instances, and the create, step, wake-budget and wake-backoff timeouts.
 The report alone is not reproducible without them.
 

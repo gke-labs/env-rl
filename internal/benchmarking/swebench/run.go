@@ -89,6 +89,14 @@ type Config struct {
 	Width int
 	// TasksPerImage is the eval mode fan-out per image.
 	TasksPerImage int
+	// DomainWidth, when above zero, makes eval mode a closed loop per
+	// placement domain: each domain runs its own tasks DomainWidth at a time
+	// and Width is not used. Replay k of an image goes to the k-th of the
+	// image's domains, wrapping. With Width alone, a domain that falls
+	// behind collects the whole run's in-flight tasks. Needs a backend with a
+	// placement plan that places at least one of the run's images. Width
+	// must still be >= 1; the run event does not record it.
+	DomainWidth int
 	// Rollouts and Steps shape steps mode: Instances x Rollouts environments
 	// driven through Steps training steps.
 	Rollouts int
@@ -180,7 +188,7 @@ var LoaderLabelKeys = []string{
 	"mode", "strategy", "window_size", "width", "images", "trajectory", "tasks_per_image", "rollouts", "steps", "park",
 	"create_timeout", "step_timeout", "wake_budget", "wake_backoff",
 	"dataset", "connections", "delete_rate", "base_template", "exclude_file", "instances", "seed", "images_per_step",
-	"park_each", "placement",
+	"park_each", "placement", "domain_width",
 }
 
 // labels describes the run for its run event.
@@ -207,6 +215,11 @@ func (c *Config) labels() map[string]string {
 	switch c.Mode {
 	case ModeEval:
 		l["tasks_per_image"] = strconv.Itoa(c.TasksPerImage)
+		if c.DomainWidth > 0 {
+			// Width is not used: reps that differ only in it are one workload.
+			l["domain_width"] = strconv.Itoa(c.DomainWidth)
+			delete(l, "width")
+		}
 	case ModeSteps:
 		l["rollouts"] = strconv.Itoa(c.Rollouts)
 		l["steps"] = strconv.Itoa(c.Steps)
@@ -293,6 +306,8 @@ func (c *Config) validate() error {
 			return errors.New("park each belongs to the step loop; it cannot be combined with a strategy")
 		case c.ImagesPerStep > 0:
 			return errors.New("images per step belongs to the step loop; it cannot be combined with a strategy")
+		case c.DomainWidth != 0:
+			return errors.New("domain width belongs to eval's loop per domain; it cannot be combined with a strategy")
 		case c.Prefetch:
 			return errors.New("prefetch belongs to the schedule's step loop; a strategy prefetches by its window (pipelined)")
 		case c.Schedule != nil:
@@ -342,6 +357,9 @@ func (c *Config) validate() error {
 		if c.TasksPerImage < 1 {
 			return errors.New("tasks per image must be >= 1")
 		}
+		if c.DomainWidth < 0 {
+			return errors.New("domain width must be >= 0")
+		}
 	case ModeSteps:
 		if c.Rollouts < 1 || c.Steps < 1 {
 			return errors.New("rollouts and steps must be >= 1")
@@ -381,6 +399,9 @@ func (c *Config) validate() error {
 	}
 	if c.ParkEach && c.Mode != ModeSteps {
 		return errors.New("park each applies to steps mode")
+	}
+	if c.DomainWidth != 0 && c.Mode != ModeEval {
+		return errors.New("domain width applies to eval mode")
 	}
 	if n := c.longestName(); len(n) > maxNameLen {
 		return fmt.Errorf("environment name %q has %d characters, more than Substrate's %d; "+
@@ -476,6 +497,9 @@ type environment struct {
 	inst Instance
 	task int
 	traj *Trajectory
+	// domain is the placement domain the environment is created in when the
+	// run is a closed loop per domain (Config.DomainWidth); empty otherwise.
+	domain string
 
 	sb          Sandbox
 	createStart time.Time
@@ -600,10 +624,16 @@ func Run(ctx context.Context, cfg Config) (*Summary, error) {
 	if err != nil {
 		return nil, err
 	}
+	var queues [][]*environment
+	if cfg.Mode == ModeEval && cfg.DomainWidth > 0 {
+		if queues, err = r.domainQueues(envs); err != nil {
+			return nil, err
+		}
+	}
 	start := time.Now()
 	switch cfg.Mode {
 	case ModeEval:
-		r.runEval(ctx, envs)
+		r.runEval(ctx, envs, queues)
 	case ModeSteps:
 		if cfg.ImagesPerStep > 0 {
 			r.runWindows(ctx)
@@ -615,8 +645,18 @@ func Run(ctx context.Context, cfg Config) (*Summary, error) {
 	}
 	dur := time.Since(start)
 	s := &Summary{Tasks: r.tasks, Failed: r.failed, Rewarded: r.rewarded, Duration: dur}
+	tags := cfg.buildRunLoadTags()
+	if len(queues) > 0 {
+		// Width is not used: each queue runs DomainWidth at a time, or all
+		// of its tasks when it has fewer.
+		inFlight := 0
+		for _, q := range queues {
+			inFlight += min(cfg.DomainWidth, len(q))
+		}
+		tags["load_max_concurrent"] = strconv.Itoa(inFlight)
+	}
 	r.rec.Record(Event{RunID: cfg.RunID, Event: EventRun, Name: string(cfg.Mode), DurMS: ms(dur),
-		OK: s.Failed == 0, Count: s.Tasks, Labels: cfg.labels(), Tags: cfg.buildRunLoadTags()})
+		OK: s.Failed == 0, Count: s.Tasks, Labels: cfg.labels(), Tags: tags})
 	return s, ctx.Err()
 }
 
@@ -801,11 +841,11 @@ func forEach(ctx context.Context, n, width int, fn func(i int)) {
 }
 
 // runEval is the evaluation shape: every environment is created, replayed
-// once and deleted, Width at a time.
-func (r *runner) runEval(ctx context.Context, envs []*environment) {
+// once and deleted, Width at a time, or DomainWidth at a time in each of
+// queues (see domainQueues) when DomainWidth is set.
+func (r *runner) runEval(ctx context.Context, envs []*environment, queues [][]*environment) {
 	var done int
-	forEach(ctx, len(envs), r.cfg.Width, func(i int) {
-		e := envs[i]
+	one := func(e *environment) {
 		if r.create(ctx, e, 0) {
 			r.replay(ctx, e, 0)
 		}
@@ -823,7 +863,60 @@ func (r *runner) runEval(ctx context.Context, envs []*environment) {
 				slog.Int("failed", r.failed), slog.Int("rewarded", r.rewarded))
 		}
 		r.mu.Unlock()
-	})
+	}
+	if len(queues) == 0 {
+		forEach(ctx, len(envs), r.cfg.Width, func(i int) { one(envs[i]) })
+		return
+	}
+	// Each queue is drained DomainWidth at a time: a slow domain keeps its
+	// own tasks and no one else's slots.
+	var wg sync.WaitGroup
+	for _, q := range queues {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			forEach(ctx, len(q), r.cfg.DomainWidth, func(i int) { one(q[i]) })
+		}()
+	}
+	wg.Wait()
+}
+
+// domainQueues splits envs into one queue per placement domain, in the
+// planned order, and sets each environment's domain: replay k of an image
+// goes to the k-th of the image's domains. Images the plan does not place
+// share one queue and get no selector. A backend that places no environment
+// is an error: the run would be one queue, a Width run that records a
+// domain width.
+func (r *runner) domainQueues(envs []*environment) ([][]*environment, error) {
+	db, ok := r.cfg.Backend.(domainBackend)
+	if !ok {
+		return nil, errors.New("domain width needs a backend with placement domains: the ate-env API backend with a placement plan")
+	}
+	var queues [][]*environment
+	index := map[string]int{}
+	for _, e := range envs {
+		e.domain = db.DomainFor(e.inst.Image, e.task)
+		i, seen := index[e.domain]
+		if !seen {
+			i = len(queues)
+			index[e.domain] = i
+			queues = append(queues, nil)
+		}
+		queues[i] = append(queues[i], e)
+	}
+	if _, unplaced := index[""]; unplaced && len(queues) == 1 {
+		return nil, errors.New("domain width needs a placement plan that places the run's images: the backend put none of them in a domain")
+	}
+	return queues, nil
+}
+
+// domainBackend is a Backend that can place an environment in a named
+// placement domain; EnvBackend with a placement plan is one.
+type domainBackend interface {
+	// DomainFor names the domain replay k of image goes to, "" for an image
+	// the plan does not place.
+	DomainFor(image string, k int) string
+	CreateInDomain(ctx context.Context, id, image, domain string) (Sandbox, error)
 }
 
 // dispatchOpenLoop dispatches fn according to a seeded Poisson arrival process
@@ -1420,7 +1513,13 @@ func (r *runner) create(ctx context.Context, e *environment, step int) bool {
 	cctx, cancel := context.WithTimeout(ctx, r.cfg.CreateTimeout)
 	defer cancel()
 	e.createStart = time.Now()
-	sb, err := r.cfg.Backend.Create(cctx, e.id, e.inst.Image)
+	var sb Sandbox
+	var err error
+	if db, ok := r.cfg.Backend.(domainBackend); ok && e.domain != "" {
+		sb, err = db.CreateInDomain(cctx, e.id, e.inst.Image, e.domain)
+	} else {
+		sb, err = r.cfg.Backend.Create(cctx, e.id, e.inst.Image)
+	}
 	ev := r.event(EventCreate, e, step, time.Since(e.createStart), err)
 	r.rec.Record(ev)
 	if err != nil {

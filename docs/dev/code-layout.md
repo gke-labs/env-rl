@@ -48,7 +48,7 @@ clients/
 integrations/            # Framework integrations: e2b (envd runtime layer), harbor (Harbor), nemo-gym (NeMo Gym), openhands, uni-agent (R2E-Gym)
 benchmarking/            # Benchmark scenarios (scenarios/), SWE-bench (swebench/), telemetry report (telemetry_report/)
 docs/                    # Architecture, glossary, release, rootfs images, security, dev guides
-examples/                # Examples: env-lifecycle, grpo, harbor, harbor-tools-layer, openhands, python-quickstart, verl_swebench, Qwen3-1.7B-verl, Qwen3.5-35B-A3B-verl, Qwen3.5-397B-A17B-verl, runtime-layers, guest-daemon, mcp
+examples/                # Examples: e2b-envd-layer, env-lifecycle, grpo, harbor, harbor-tools-layer, openhands, python-quickstart, verl_swebench, Qwen3-1.7B-verl, Qwen3.5-35B-A3B-verl, Qwen3.5-397B-A17B-verl, runtime-layers, guest-daemon, mcp
 hack/                    # Repository scripts: CI (ci/), release (release/), verification (verify/, boilerplate/)
 ```
 

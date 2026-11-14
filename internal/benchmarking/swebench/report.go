@@ -589,6 +589,8 @@ type Builder struct {
 	stepInferredMisses map[int]int
 	peakActiveEnvs     int
 	peakPausedEnvs     int
+	curActiveEnvs      int
+	curPausedEnvs      int
 	faults             *faultTracker
 }
 
@@ -649,6 +651,7 @@ func (b *Builder) markEnvState(env string, step int, state string) {
 	if stepKey <= 0 {
 		stepKey = 1
 	}
+	prev := b.envState[env]
 	switch state {
 	case "active":
 		b.envState[env] = "active"
@@ -665,20 +668,28 @@ func (b *Builder) markEnvState(env string, step int, state string) {
 	case "deleted":
 		delete(b.envState, env)
 	}
-	var curActive, curPaused int
-	for _, st := range b.envState {
-		switch st {
+	// The two counts are kept as states change. Recounting every environment
+	// on every event is quadratic: a run with 200,000 resident environments
+	// and tens of millions of events does not finish.
+	if next := b.envState[env]; next != prev {
+		switch prev {
 		case "active":
-			curActive++
+			b.curActiveEnvs--
 		case "paused":
-			curPaused++
+			b.curPausedEnvs--
+		}
+		switch next {
+		case "active":
+			b.curActiveEnvs++
+		case "paused":
+			b.curPausedEnvs++
 		}
 	}
-	if curActive > b.peakActiveEnvs {
-		b.peakActiveEnvs = curActive
+	if b.curActiveEnvs > b.peakActiveEnvs {
+		b.peakActiveEnvs = b.curActiveEnvs
 	}
-	if curPaused > b.peakPausedEnvs {
-		b.peakPausedEnvs = curPaused
+	if b.curPausedEnvs > b.peakPausedEnvs {
+		b.peakPausedEnvs = b.curPausedEnvs
 	}
 }
 
@@ -2744,7 +2755,10 @@ func makeMetricSummary(xs []float64, unit string) schema.MetricSummary {
 	}
 }
 
-func feedReaderToBuilder(r io.Reader, b *Builder) error {
+// ScanEvents calls add for each event of the JSONL stream r, in order. A
+// blank line is skipped. A line that does not parse, or one longer than
+// 16 MB, ends the scan with an error.
+func ScanEvents(r io.Reader, add func(Event)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1<<20), 16<<20)
 	for sc.Scan() {
@@ -2756,7 +2770,7 @@ func feedReaderToBuilder(r io.Reader, b *Builder) error {
 		if err := json.Unmarshal(line, &e); err != nil {
 			return fmt.Errorf("parse event: %w", err)
 		}
-		b.Add(e)
+		add(e)
 	}
 	return sc.Err()
 }
@@ -2764,7 +2778,7 @@ func feedReaderToBuilder(r io.Reader, b *Builder) error {
 // Summarize streams JSONL events from r into a Builder and returns the report.
 func Summarize(r io.Reader) (*Report, error) {
 	b := NewBuilder()
-	if err := feedReaderToBuilder(r, b); err != nil {
+	if err := ScanEvents(r, b.Add); err != nil {
 		return nil, err
 	}
 	return b.Finish(), nil
@@ -2885,7 +2899,7 @@ func SummarizeFiles(paths []string) (*Report, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open shard %q: %w", p, err)
 		}
-		err = feedReaderToBuilder(f, b)
+		err = ScanEvents(f, b.Add)
 		_ = f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read shard %q: %w", p, err)
@@ -3853,9 +3867,32 @@ func ParsePromLineValue(line string) (float64, bool) {
 }
 
 // LoadOrSummarizeReport loads a pre-rendered report.json (normalizing legacy fields)
-// or summarizes a JSONL event stream from path.
+// or summarizes a JSONL event stream from path. An events file whose second
+// non-empty line starts with "{" is streamed; any other file is read whole.
 func LoadOrSummarizeReport(path string) (*Report, error) {
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	// head holds what the peek at the first two non-empty lines read, so the
+	// file is read once and need not be seekable.
+	var head bytes.Buffer
+	sc := bufio.NewScanner(io.TeeReader(f, &head))
+	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
+	lines := 0
+	for lines < 2 && sc.Scan() {
+		if len(bytes.TrimSpace(sc.Bytes())) > 0 {
+			lines++
+		}
+	}
+	rest := io.MultiReader(&head, f)
+	// A second line that starts with "{" puts "\n{" in the trimmed file, which
+	// the check below sends to Summarize.
+	if lines == 2 && sc.Bytes()[0] == '{' {
+		return Summarize(rest)
+	}
+	raw, err := io.ReadAll(rest)
 	if err != nil {
 		return nil, err
 	}
@@ -4561,47 +4598,75 @@ type RestoreBreakdown struct {
 // pairSlack absorbs the clock difference between the loader and a node.
 const pairSlack = 2 * time.Second
 
-// JoinRestores pairs each restore record with the ttfi or wake event of its
+// restoreWindow is what the restore join reads of a ttfic or wake event.
+type restoreWindow struct {
+	end   time.Time
+	durMS float64
+	wake  bool
+	ok    bool
+}
+
+// RestoreWindows holds the ttfic and wake events of a run, by environment,
+// reduced to the fields the restore join reads. The zero value is ready.
+type RestoreWindows struct {
+	byEnv              map[string][]restoreWindow
+	spanStart, spanEnd time.Time
+}
+
+// Add keeps e when it is a ttfic or wake event.
+func (w *RestoreWindows) Add(e Event) {
+	if e.Event != EventTTFIC && e.Event != EventWake {
+		return
+	}
+	if w.byEnv == nil {
+		w.byEnv = map[string][]restoreWindow{}
+	}
+	w.byEnv[e.Env] = append(w.byEnv[e.Env], restoreWindow{end: e.Time, durMS: e.DurMS, wake: e.Event == EventWake, ok: e.OK})
+	if start := e.Time.Add(-time.Duration(e.DurMS * float64(time.Millisecond))); w.spanStart.IsZero() || start.Before(w.spanStart) {
+		w.spanStart = start
+	}
+	if w.spanEnd.IsZero() || e.Time.After(w.spanEnd) {
+		w.spanEnd = e.Time
+	}
+}
+
+// JoinRestores joins the restore records to the ttfic and wake events among
+// events. See RestoreWindows.Join.
+func JoinRestores(events []Event, timings map[string][]RestoreTiming) *RestoreBreakdown {
+	var w RestoreWindows
+	for _, e := range events {
+		w.Add(e)
+	}
+	return w.Join(timings)
+}
+
+// Join pairs each restore record with the ttfic or wake event of its
 // environment whose window, the event's end minus its duration up to its
 // end, contains the record's time. A record paired with a ttfic event is a
 // first start; one paired with a wake is a wake. Records outside the run's
 // span, for unknown actors, or inside no window are counted, not paired.
-func JoinRestores(events []Event, timings map[string][]RestoreTiming) *RestoreBreakdown {
+func (w *RestoreWindows) Join(timings map[string][]RestoreTiming) *RestoreBreakdown {
 	b := &RestoreBreakdown{}
-	windows := map[string][]Event{}
-	var spanStart, spanEnd time.Time
-	for _, e := range events {
-		if e.Event != EventTTFIC && e.Event != EventWake {
-			continue
-		}
-		windows[e.Env] = append(windows[e.Env], e)
-		if start := e.Time.Add(-time.Duration(e.DurMS * float64(time.Millisecond))); spanStart.IsZero() || start.Before(spanStart) {
-			spanStart = start
-		}
-		if spanEnd.IsZero() || e.Time.After(spanEnd) {
-			spanEnd = e.Time
-		}
-	}
 	var firstRecs, wakeRecs []RestoreTiming
 	var firstOutside, wakeOutside []float64
 	for actor, recs := range timings {
 		for _, rt := range recs {
-			if spanStart.IsZero() || rt.Time.Before(spanStart.Add(-pairSlack)) || rt.Time.After(spanEnd.Add(pairSlack)) {
+			if w.spanStart.IsZero() || rt.Time.Before(w.spanStart.Add(-pairSlack)) || rt.Time.After(w.spanEnd.Add(pairSlack)) {
 				b.OutsideRun++
 				continue
 			}
-			evs := windows[actor]
+			evs := w.byEnv[actor]
 			if len(evs) == 0 {
 				b.Unmatched++
 				continue
 			}
-			var ev *Event
+			var ev *restoreWindow
 			for i := range evs {
-				start := evs[i].Time.Add(-time.Duration(evs[i].DurMS * float64(time.Millisecond)))
-				if rt.Time.Before(start.Add(-pairSlack)) || rt.Time.After(evs[i].Time.Add(pairSlack)) {
+				start := evs[i].end.Add(-time.Duration(evs[i].durMS * float64(time.Millisecond)))
+				if rt.Time.Before(start.Add(-pairSlack)) || rt.Time.After(evs[i].end.Add(pairSlack)) {
 					continue
 				}
-				if ev == nil || evs[i].Time.Before(ev.Time) {
+				if ev == nil || evs[i].end.Before(ev.end) {
 					ev = &evs[i]
 				}
 			}
@@ -4610,7 +4675,7 @@ func JoinRestores(events []Event, timings map[string][]RestoreTiming) *RestoreBr
 				continue
 			}
 			g, recsOut, outside := &b.Wakes, &wakeRecs, &wakeOutside
-			if ev.Event == EventTTFIC {
+			if !ev.wake {
 				g, recsOut, outside = &b.First, &firstRecs, &firstOutside
 			}
 			if rt.Err != "" {
@@ -4618,11 +4683,11 @@ func JoinRestores(events []Event, timings map[string][]RestoreTiming) *RestoreBr
 				continue
 			}
 			*recsOut = append(*recsOut, rt)
-			if !ev.OK {
+			if !ev.ok {
 				g.FailedEvents++
 				continue
 			}
-			*outside = append(*outside, ev.DurMS-rt.Phases["total"]*1000)
+			*outside = append(*outside, ev.durMS-rt.Phases["total"]*1000)
 		}
 	}
 	b.First.Restores, b.First.Phases, b.First.Outside = len(firstRecs), phaseStats(firstRecs), spanStat("outside", firstOutside)

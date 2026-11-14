@@ -246,6 +246,39 @@ func (b *EnvBackend) selectorFor(image string) map[string]string {
 	return maps.Clone(d.Selector)
 }
 
+// DomainFor names the placement domain replay k of image goes to: the k-th
+// of the image's domains, wrapping; "" without a plan, for an image the
+// plan does not place, or for a negative k.
+func (b *EnvBackend) DomainFor(image string, k int) string {
+	if b.placement == nil || k < 0 {
+		return ""
+	}
+	entry := b.placement.Entry(image)
+	if entry == nil || len(entry.Domains) == 0 {
+		return ""
+	}
+	return entry.Domains[k%len(entry.Domains)]
+}
+
+// CreateInDomain creates the environment with the worker selector of the
+// named placement domain, which must be one of the domains the plan puts
+// image in.
+func (b *EnvBackend) CreateInDomain(ctx context.Context, id, image, domain string) (Sandbox, error) {
+	var d *schema.PlacementDomain
+	var entry *schema.ImagePlacementEntry
+	if b.placement != nil {
+		d = b.placement.Domain(domain)
+		entry = b.placement.Entry(image)
+	}
+	if d == nil {
+		return nil, fmt.Errorf("create %s: the placement plan has no domain %q", id, domain)
+	}
+	if entry == nil || !slices.Contains(entry.Domains, domain) {
+		return nil, fmt.Errorf("create %s: the placement plan does not put %s in domain %q", id, image, domain)
+	}
+	return b.CreateWith(ctx, id, image, CreateOptions{WorkerSelector: maps.Clone(d.Selector)})
+}
+
 // DefaultDeleteRate is the loader's default cap on the environment deletes an
 // ate-env-api backend issues per second, across all its connections. A
 // delete removes the environment's snapshots from the bucket, and the bucket

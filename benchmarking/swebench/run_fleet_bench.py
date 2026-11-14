@@ -71,6 +71,7 @@ VALID_STRATEGIES = ("none", "naive", "sliding", "pipelined")
 VALID_MODES = ("eval", "steps")
 VALID_BACKENDS = ("substrate", "mock")
 
+# The Go loader's swebench.LoaderLabelKeys: report -arm compares these keys.
 LOADER_LABEL_KEYS = frozenset({
     "mode",
     "strategy",
@@ -95,6 +96,8 @@ LOADER_LABEL_KEYS = frozenset({
     "seed",
     "images_per_step",
     "park_each",
+    "placement",
+    "domain_width",
 })
 
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")

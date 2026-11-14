@@ -11,14 +11,37 @@ from e2b import Sandbox       # or AsyncSandbox
 from ate_env_e2b import Sandbox
 ```
 
-[envd](https://github.com/e2b-dev/runtime/tree/main/packages/envd) is the daemon the E2B SDK talks
-to inside a sandbox. This directory runs it in an environment as a
-[runtime layer](../../docs/rootfs-images/RUNTIMES.md): the task image is not changed. The classes of
-the package [`ate-env-e2b`](./src/ate_env_e2b) keep the SDK's own `commands`, `files` and `pty`
-code, which talks to that envd through the port proxy, and send the lifecycle calls to
-`ate-env-api` instead of E2B's API.
+## How it works: envd is an added layer
+
+An E2B sandbox is an image plus
+[envd](https://github.com/e2b-dev/runtime/tree/main/packages/envd), the daemon the E2B SDK talks
+to inside a sandbox. Here envd is not built into the image. It is a
+[runtime layer](../../docs/rootfs-images/RUNTIMES.md): an image of its own, mounted read-only next
+to the root filesystem image. The task image is not rebuilt and not changed, thus any image that
+meets [two conditions](#what-the-image-needs) is an E2B-compatible sandbox.
+
+| Part                  | What it is                                                              | Set by                                            |
+| --------------------- | ----------------------------------------------------------------------- | ------------------------------------------------- |
+| Root filesystem image | Your image, unmodified                                                  | The base template, or `Sandbox.create("<image>")` |
+| ate-env guest         | Mounted at `/ate`. PID 1: it starts envd and watches it                 | The base template                                 |
+| envd layer            | [`layer/`](./layer): upstream's envd binary, mounted at `/opt/e2b`      | The base template                                 |
+| envd process          | `/opt/e2b/envd` on port 49983, a sidecar that the guest starts          | The base template                                 |
+
+The two halves of this directory:
+
+1. **The layer and its base template**, once for each cluster: build the layer image and
+   [register the base template](#register-the-base-template) `e2b-base`. An environment created
+   from another image on that base keeps the layer.
+2. **The classes**, in each program: the package [`ate-env-e2b`](./src/ate_env_e2b) keeps the SDK's
+   own `commands`, `files` and `pty` code, which talks to that envd through the port proxy, and
+   sends the lifecycle calls to `ate-env-api` instead of E2B's API.
+
+[`examples/e2b-envd-layer`](../../examples/e2b-envd-layer/README.md) does both ends in one script:
+it builds the layer, registers the template and runs an E2B program on two images.
 
 ## Use the classes
+
+The cluster needs the base template first ([Register the base template](#register-the-base-template)).
 
 ```bash
 pip install ./clients/python -e integrations/e2b   # Python 3.11 or newer, e2b 2.63 to below 3
@@ -119,6 +142,9 @@ The classes override public names of the SDK only, and refuse by default. Each r
 `e2b` is held to `>=2.63,<3`. A newer 2.x cannot widen what the classes do: a new method or a new
 argument is refused, and the SDK object holds no API key and an API address that does not resolve
 (`ate-env-e2b.invalid`), thus an SDK code path that the classes do not map cannot reach E2B.
+A weekly job (`.github/workflows/e2b-drift.yaml`, `hack/ci/e2b-drift.sh`) runs these tests and the
+Kind test of the classes against the newest `e2b` below 3, which `uv.lock` does not hold. It is not
+a required check.
 
 ### How it is tested
 
@@ -195,6 +221,8 @@ with the API's caller token when the API has one.
   fails with `fork/exec /bin/sh: operation not permitted`.
 - `/bin/sh`: envd starts each process through it. envd itself is static and starts in a musl image
   (Alpine, for example).
+- `/bin/bash`, for the E2B SDK: it runs each command and each PTY in `/bin/bash`. In an image
+  without it, envd's file calls work and each command fails.
 
 ## Tests
 

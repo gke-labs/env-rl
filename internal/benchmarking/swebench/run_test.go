@@ -1120,12 +1120,20 @@ func TestLabelsAreDeclared(t *testing.T) {
 	if l["commit"] != "abc" || l["dataset"] != "d.jsonl" || l["width"] != "3" || l["rollouts"] != "2" || l["wake_budget"] != "1m0s" || l["images_per_step"] != "2" {
 		t.Fatalf("labels = %v", l)
 	}
-	for k := range l {
-		if k == "commit" {
-			continue
-		}
-		if !slices.Contains(LoaderLabelKeys, k) {
-			t.Errorf("the loader records %s but LoaderLabelKeys lacks it, so report -arm would not compare it", k)
+	eval := Config{Mode: ModeEval, Width: 3, Trajectory: &Trajectory{Name: "t"}, TasksPerImage: 2, DomainWidth: 4}
+	le := eval.labels()
+	// Width is not used with a domain width, and not recorded.
+	if _, width := le["width"]; le["tasks_per_image"] != "2" || le["domain_width"] != "4" || width {
+		t.Fatalf("eval labels = %v", le)
+	}
+	for _, l := range []map[string]string{l, le} {
+		for k := range l {
+			if k == "commit" {
+				continue
+			}
+			if !slices.Contains(LoaderLabelKeys, k) {
+				t.Errorf("the loader records %s but LoaderLabelKeys lacks it, so report -arm would not compare it", k)
+			}
 		}
 	}
 }
@@ -1133,7 +1141,7 @@ func TestLabelsAreDeclared(t *testing.T) {
 // An operator label may not take a key the loader records: report -arm
 // trusts those keys to tell one workload from another.
 func TestValidateRejectsLoaderLabelKeys(t *testing.T) {
-	for _, k := range []string{"width", "dataset", "set.READ_FILES"} {
+	for _, k := range []string{"width", "dataset", "domain_width", "set.READ_FILES"} {
 		cfg := baseConfig(t, newFake(), nil)
 		cfg.Mode, cfg.TasksPerImage = ModeEval, 1
 		cfg.Labels = map[string]string{k: "x"}

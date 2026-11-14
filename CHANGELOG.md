@@ -41,6 +41,14 @@ user needs to know across them.
   on `CreateEnvironment`, `GetEnvironment` and `ListEnvironments`. Python:
   `EnvironmentInfo.create_time`, a UTC `datetime`, or `None` from a server
   that predates the field.
+- `examples/e2b-envd-layer`: an E2B-compatible sandbox from any image, with
+  upstream envd as an added runtime layer. `demo.sh` builds the layer,
+  registers the base template and runs an E2B SDK program on two images.
+  `integrations/README.md` and `integrations/e2b/README.md` explain that the
+  framework daemons are layers next to an unmodified root filesystem image.
+- CI: the weekly workflow `e2b-drift` runs the tests of `integrations/e2b`
+  and the Kind test of the E2B classes against the newest `e2b` below 3, not
+  the version in `uv.lock`. It is not a required check.
 - `integrations/e2b`: the package `ate-env-e2b` (e2b 2.63 to below 3, Python
   3.11 or newer). `ate_env_e2b.Sandbox` and `ate_env_e2b.AsyncSandbox` are
   subclasses of `e2b.Sandbox` and `e2b.AsyncSandbox`: a program changes its
@@ -159,6 +167,15 @@ user needs to know across them.
 - Python client: `Client(credentials=...)` connects to ate-env-api over TLS
   with the given `grpc.ChannelCredentials`, as the Go client can with
   `DialOptions`. Without it the channel stays plaintext.
+- `swebench-loader run -domain-width N`: in eval mode with `-placement`, runs
+  N tasks at a time in each placement domain, a closed loop per domain, in
+  place of `-width` across the run. Replay k of an image goes to the k-th of
+  its domains (`EnvBackend` `DomainFor` and `CreateInDomain`). The run
+  records the `domain_width` label, so `report -arm` keeps runs with
+  different domain widths apart, and no `width` label, so reps may differ in
+  `-width`. `load_max_concurrent` is the sum over the domain queues of N, or
+  of a queue's tasks when it has fewer. `run_fleet_bench.py` refuses
+  `--label placement` and `--label domain_width`, as the loader does.
 - `swebench-loader run -preflight`: with `-placement`, runs the pre-flight
   over the plan inside the same command before the run (the `preflight`
   subcommand's defaults), writing `preflight-events.jsonl` and
@@ -613,6 +630,14 @@ user needs to know across them.
   stays as a re-export of the new module, with the same names.
 
 ### Fixed
+- `bench report -dest` finishes on runs with tens of millions of events. It
+  reads the event files once, one file at a time. Of the events it keeps only
+  the `ttfic` and `wake` fields that the restore join reads, and only when the
+  bundle has `atelet_restores.jsonl` or `restore_timings.jsonl`. Before, it
+  held every event file and every parsed event in memory, and it recounted
+  the live environments on each event. `bench report <events.jsonl>` had the
+  same recount and held the file in memory; it now streams the file. The
+  output of both does not change.
 - Python client: `close_async()` on the caller's loop ends an image pre-flight
   (`FleetConfig.preflight`, `preflight_images_async`) at once, also one that
   is between two requests: in its pool-listing backoff, in the golden poll,
