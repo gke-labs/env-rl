@@ -386,6 +386,9 @@ class Client:
         the environments of the page it read whose status is in the set. A
         page can thus hold fewer environments than ``page_size``, or none,
         while ``next_page_token`` is set: follow the token until it is "".
+        ``EnvironmentStatus.UNSPECIFIED`` is a status like the others, not
+        "all": it keeps only the environments whose state the server cannot
+        name.
         """
         req = env_pb2.ListEnvironmentsRequest(
             atespace=atespace,

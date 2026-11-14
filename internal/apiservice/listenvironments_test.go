@@ -299,6 +299,21 @@ func TestListEnvironmentsStatusFilter(t *testing.T) {
 	if n := control.ListCalls(); n != calls {
 		t.Errorf("status 99 made %d ListActors calls, want none", n-calls)
 	}
+
+	// An actor in a state the server cannot name is UNSPECIFIED. The
+	// UNSPECIFIED filter keeps it and nothing else, and another filter does
+	// not keep it.
+	if _, err := client.CreateEnvironment(ctx, &ateenvv1alpha.CreateEnvironmentRequest{Id: "e-6"}); err != nil {
+		t.Fatalf("CreateEnvironment(e-6): %v", err)
+	}
+	control.SetState("e-6", ateapipb.ActorState(99))
+	unspecified := ateenvv1alpha.EnvironmentStatus_ENVIRONMENT_STATUS_UNSPECIFIED
+	if ids := envIDs(list(0, "", unspecified).GetEnvironments()); !slices.Equal(ids, []string{"e-6"}) {
+		t.Errorf("statuses [UNSPECIFIED] with an unnamed state: got %v, want [e-6]", ids)
+	}
+	if ids := envIDs(list(0, "", running).GetEnvironments()); !slices.Equal(ids, []string{"e-0", "e-1", "e-4"}) {
+		t.Errorf("statuses [RUNNING] with an unnamed state: got %v, want [e-0 e-1 e-4]", ids)
+	}
 }
 
 // TestEnvironmentCreateTime checks AE-10: create_time is the actor's

@@ -303,6 +303,9 @@ func (c *Client) get(ctx context.Context, cn *conn, atespace, id string) (_ *ate
 // server's page size. With req.Statuses, the server filters each page after
 // it reads it, thus a page can hold fewer environments than the page size,
 // or none, while the token is set: follow the token until it is empty.
+// ENVIRONMENT_STATUS_UNSPECIFIED in req.Statuses is a status like the others,
+// not "all": it keeps only the environments whose state the server cannot
+// name.
 func (c *Client) List(ctx context.Context, req *ateenvv1alpha.ListEnvironmentsRequest) (_ *ateenvv1alpha.ListEnvironmentsResponse, err error) {
 	if req == nil {
 		req = &ateenvv1alpha.ListEnvironmentsRequest{}
