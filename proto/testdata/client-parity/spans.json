@@ -63,6 +63,19 @@
     }
   },
   {
+    "name": "list_environments/default_atespace",
+    "operation": "list_environments",
+    "inputs": {},
+    "expected_span": "list_environments",
+    "expected_attributes": {},
+    "python_only": {
+      "attributes": {
+        "ate.atespace": "ate-env"
+      },
+      "reason": "Python Client.list_environments defaults atespace to ate-env; Go omits ate.atespace when the request names none, as for get, suspend and delete (docs/plans/telemetry/decisions.md, 2026-11-12)"
+    }
+  },
+  {
     "operation": "suspend_environment",
     "inputs": {
       "id": "traced",

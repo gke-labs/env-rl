@@ -881,9 +881,10 @@ type ListEnvironmentsRequest struct {
 	// Substrate atespace to list (defaults to "ate-env").
 	Atespace string `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	// Number of environments the server reads from Substrate for this page. 0
-	// means the server default, 100. The server reads at most 1000: a larger
-	// value is lowered to 1000 and not refused. A negative value is
-	// INVALID_ARGUMENT. Substrate can return fewer on any page.
+	// means the server default, 100. The server asks Substrate for at most
+	// 1000: a larger value is lowered to 1000 and not refused. A negative value
+	// is INVALID_ARGUMENT. Substrate can return fewer on any page, or
+	// occasionally a few more; the server passes the page on as it is.
 	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// next_page_token of the previous response, for the same atespace; empty
 	// for the first page. The token is opaque: it is Substrate's, passed
@@ -893,6 +894,8 @@ type ListEnvironmentsRequest struct {
 	// page after it reads it from Substrate. A page can thus hold fewer
 	// environments than page_size, or none, while next_page_token is set. A
 	// value outside EnvironmentStatus is INVALID_ARGUMENT.
+	// ENVIRONMENT_STATUS_UNSPECIFIED is a status like the others, not "all":
+	// it keeps the environments whose state the server cannot name.
 	Statuses      []EnvironmentStatus `protobuf:"varint,4,rep,packed,name=statuses,proto3,enum=ateenv.v1alpha.EnvironmentStatus" json:"statuses,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

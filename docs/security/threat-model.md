@@ -177,8 +177,8 @@ The `editor` role of the access policy already allows that call, thus the RPC ad
 
 | Threat | Current mitigation | Gap |
 |---|---|---|
-| A caller enumerates the environments of other callers | The token (Boundary 1). The access policy limits `ate-env-api` to its atespaces, thus the list reaches no other atespace. | Each token holder reads the id, template, status, node and create time of every environment in every atespace that `ate-env-api` can use. Before, a caller had to know an id to read these with `GetEnvironment`. With an id, a token holder can already run commands in that environment (Boundary 1, one shared token). |
-| Large responses | One call reads at most 1000 actors from Substrate (`MaxListPageSize`), 100 by default, and holds one page in memory. | No rate limit, as for the other RPCs. |
+| A caller enumerates the environments of other callers | The token (Boundary 1). The list reads one atespace for each call, with the access that the policy gives `ate-env-api`: the `editor` role on the atespaces an operator adds. | The RPC has no list of allowed atespaces. With the global viewer binding (`ate-env manifest access-policy --global`, which `ListPlacementDomains` needs), `ate-env-api` can list the actors of each atespace of the control plane, also ones that ate-env did not create, thus a token holder can too. Each token holder reads the id, template, status, node and create time of every environment in every atespace that `ate-env-api` can read. Before, a caller had to know an id to read these with `GetEnvironment`. With an id, a token holder can already run commands in that environment (Boundary 1, one shared token). |
+| Large responses | One call asks Substrate for at most 1000 actors (`MaxListPageSize`), 100 by default, and holds one page in memory. Substrate can return a few more than the page size. | No rate limit, as for the other RPCs. |
 
 ## Client tracing
 

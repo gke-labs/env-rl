@@ -124,6 +124,10 @@ func TestListEnvironmentsPageSize(t *testing.T) {
 	client, control := newTestEnv(t)
 	ctx := context.Background()
 	seedActors(t, control, apiservice.DefaultAtespace, "env", apiservice.MaxListPageSize+1)
+	// The fake control plane serves pages above the server's cap, thus a
+	// page of the cap's size proves that the server lowered the value, and
+	// not Substrate.
+	control.MaxPageSize = 2 * apiservice.MaxListPageSize
 
 	for _, tc := range []struct {
 		name      string
@@ -256,6 +260,8 @@ func TestListEnvironmentsStatusFilter(t *testing.T) {
 		{[]ateenvv1alpha.EnvironmentStatus{paused}, []string{"e-3"}},
 		{[]ateenvv1alpha.EnvironmentStatus{suspended, paused, crashed}, []string{"e-2", "e-3", "e-5"}},
 		{[]ateenvv1alpha.EnvironmentStatus{ateenvv1alpha.EnvironmentStatus_ENVIRONMENT_STATUS_DELETING}, nil},
+		// UNSPECIFIED is a status like the others, not "all".
+		{[]ateenvv1alpha.EnvironmentStatus{ateenvv1alpha.EnvironmentStatus_ENVIRONMENT_STATUS_UNSPECIFIED}, nil},
 	} {
 		resp := list(0, "", tc.statuses...)
 		if ids := envIDs(resp.GetEnvironments()); !slices.Equal(ids, tc.want) {
