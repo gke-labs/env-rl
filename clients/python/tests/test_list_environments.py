@@ -66,6 +66,23 @@ async def test_list_environments_follows_the_token(fake_stack):
         await client.list_environments(page_size=-1)
 
 
+async def test_list_environments_page_size_outside_int32(fake_stack):
+    """A page size that does not fit the int32 field behaves as a large or a
+    negative one does: the server caps the first and refuses the second."""
+    client, _ = fake_stack
+    for i in range(3):
+        await client.create(f"env-{i}")
+
+    page = await client.list_environments(page_size=10**10)
+    assert [e.id for e in page.environments] == ["env-0", "env-1", "env-2"]
+    assert page.next_page_token == ""
+    page = await client.list_environments(page_size=2**31)
+    assert len(page.environments) == 3
+
+    with pytest.raises(InvalidArgumentError):
+        await client.list_environments(page_size=-(10**10))
+
+
 async def test_list_environments_status_filter_keeps_the_token(fake_stack):
     client, _ = fake_stack
     for i in range(4):

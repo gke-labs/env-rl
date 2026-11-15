@@ -78,6 +78,11 @@ def _normalize_target(endpoint: str) -> str:
 
 _ENVIRONMENT_SERVICE = "ateenv.v1alpha.EnvironmentService"
 
+# The range of an int32 proto field. protobuf raises ValueError for a value
+# outside it when the message is built, before any RPC.
+_INT32_MIN = -(2**31)
+_INT32_MAX = 2**31 - 1
+
 
 def _env_rpc_attrs(method: str, target: str | None) -> dict[str, object]:
     return rpc_attrs(_ENVIRONMENT_SERVICE, method, target)
@@ -381,7 +386,10 @@ class Client:
 
         ``page_size`` is how many environments the server reads for the page:
         0 means the server default (100), and the server lowers a value above
-        1000 to 1000. ``page_token`` is the ``next_page_token`` of the
+        1000 to 1000 and refuses a negative one (``InvalidArgumentError``).
+        The field is an int32: the client sends a value outside that range as
+        the nearest int32, thus a larger value is lowered and a negative one
+        is refused all the same. ``page_token`` is the ``next_page_token`` of the
         previous page, "" for the first. With ``statuses``, the server keeps
         the environments of the page it read whose status is in the set. A
         page can thus hold fewer environments than ``page_size``, or none,
@@ -392,7 +400,7 @@ class Client:
         """
         req = env_pb2.ListEnvironmentsRequest(
             atespace=atespace,
-            page_size=page_size,
+            page_size=max(_INT32_MIN, min(page_size, _INT32_MAX)),
             page_token=page_token,
             statuses=[int(s) for s in statuses],
         )
