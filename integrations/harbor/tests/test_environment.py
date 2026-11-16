@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 from ate_env_rl import FailedPreconditionError, RpcError
+from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig
 from harbor.models.trial.config import ResourceMode
 
@@ -674,6 +675,49 @@ async def test_preflight_checks_the_api_from_the_environment(fake, monkeypatch):
     # here: the fake API is served by this very loop, which the call blocks.
     with pytest.raises(SystemExit, match="cannot reach|no answer"):
         AteEnvEnvironment.preflight()
+
+
+# HB-25: the provider accepts Harbor 0.26 next to 0.25.
+def test_preflight_calls_the_base_hook_of_either_harbor_minor(monkeypatch):
+    monkeypatch.delenv("SUBSTRATE_ENV_API", raising=False)
+    seen = []
+    # Harbor 0.26: the base hook takes the job kwargs (and validates them).
+    monkeypatch.setattr(
+        BaseEnvironment,
+        "preflight",
+        classmethod(lambda cls, kwargs=None: seen.append(("0.26", cls, kwargs))),
+    )
+    AteEnvEnvironment.preflight({"template": "t"})
+    AteEnvEnvironment.preflight()
+    # Harbor 0.25: the base hook takes no argument.
+    monkeypatch.setattr(
+        BaseEnvironment, "preflight", classmethod(lambda cls: seen.append(("0.25", cls)))
+    )
+    AteEnvEnvironment.preflight({"template": "t"})
+    assert seen == [
+        ("0.26", AteEnvEnvironment, {"template": "t"}),
+        ("0.26", AteEnvEnvironment, None),
+        ("0.25", AteEnvEnvironment),
+    ]
+    # What the base hook raises (0.26: invalid declared options) reaches Harbor.
+    def refuse(cls, kwargs=None):
+        raise ValueError("Invalid kwargs for environment 'ate-env'")
+
+    monkeypatch.setattr(BaseEnvironment, "preflight", classmethod(refuse))
+    with pytest.raises(ValueError, match="Invalid kwargs"):
+        AteEnvEnvironment.preflight({"nope": 1})
+
+
+# HB-25: on Harbor 0.26, preflight gets the job kwargs.
+@pytest.mark.parametrize("key", ["api_url", "api_token"])
+@pytest.mark.parametrize("value", [1234, True, False, 0, ["h:1"]])
+def test_preflight_refuses_an_endpoint_or_token_that_is_not_a_string(monkeypatch, key, value):
+    # Harbor 0.26 decodes an --ek value as JSON: `--ek api_url=1234` is an int
+    # and `--ek api_url=true` a bool. Harbor's preflight runner reports a
+    # ValueError and ends cleanly; another exception type is a traceback.
+    monkeypatch.setenv("SUBSTRATE_ENV_API", "127.0.0.1:1")
+    with pytest.raises(ValueError, match=key):
+        AteEnvEnvironment.preflight({key: value})
 
 
 def test_task_dir_fixture_is_the_echo_task(task_dir: Path):

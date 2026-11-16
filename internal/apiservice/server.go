@@ -22,11 +22,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"io"
+	"log"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/agent-substrate/env/internal/ate"
+	"github.com/agent-substrate/env/internal/envstore"
 	"github.com/agent-substrate/env/internal/routertls"
 	"github.com/agent-substrate/env/internal/telemetry"
 	ateenvv1alpha "github.com/agent-substrate/env/proto/ateenv/v1alpha"
@@ -61,6 +63,11 @@ type Server struct {
 	client     *ate.Client
 	routerAddr string
 	hostSuffix string
+
+	// Store keeps the labels and the deadline of an environment
+	// (internal/envstore). Nil, the default, means the store is off: the
+	// server then makes no call to Kubernetes.
+	Store *envstore.Store
 
 	// WakeBudget bounds how long a guest call waits for a suspended
 	// environment to wake; see ensureAwake. Zero means DefaultWakeBudget.
@@ -525,10 +532,39 @@ func (s *Server) DeleteEnvironment(ctx context.Context, req *ateenvv1alpha.Delet
 		atespace = DefaultAtespace
 	}
 
+	// The object of the environment, as the store's informer has it before
+	// the delete. An environment with no label and no deadline has none, and
+	// its delete then makes no call to Kubernetes.
+	var record envstore.Record
+	var hasRecord bool
+	if s.Store != nil {
+		var err error
+		record, hasRecord, err = s.Store.Get(atespace, req.GetId())
+		if err != nil {
+			// An object that holds no readable record is not an environment
+			// with no object. The delete goes on, because the actor is the
+			// truth, and the object stays for the sweep, which deletes and
+			// reports it after the grace period.
+			log.Printf("apiservice: DeleteEnvironment %s/%s: %v; the orphan sweep removes the object", atespace, req.GetId(), err)
+		}
+	}
+
 	if err := s.client.Delete(ctx, atespace, req.GetId()); err != nil {
 		return nil, toGRPCError(err)
 	}
 	s.finishCreate(atespace, req.GetId(), telemetry.ReadyStatusDeleted)
+	if hasRecord {
+		// The environment is deleted: the actor is the truth. The delete
+		// removes only the object read above; one written since is of a new
+		// environment with this id. An object that stays is an orphan, and
+		// the sweep removes it. The caller's context can have ended with
+		// the actor's delete, thus this call has a time of its own.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if err := s.Store.Delete(ctx, record); err != nil {
+			log.Printf("apiservice: DeleteEnvironment %s/%s: %v; the orphan sweep removes the object", atespace, req.GetId(), err)
+		}
+	}
 
 	return &ateenvv1alpha.DeleteEnvironmentResponse{}, nil
 }
@@ -1120,4 +1156,18 @@ func countEnvironments(ctx context.Context, spaces []string, limit int,
 		}
 	}
 	return out, nil
+}
+
+// ActorUIDs returns the uid of each actor of an atespace, by id: what the
+// store's orphan sweep compares its objects with (envstore.ActorUIDs).
+func (s *Server) ActorUIDs(ctx context.Context, atespace string) (map[string]string, error) {
+	actors, err := s.client.List(ctx, atespace)
+	if err != nil {
+		return nil, err
+	}
+	uids := make(map[string]string, len(actors))
+	for _, a := range actors {
+		uids[a.GetMetadata().GetName()] = a.GetMetadata().GetUid()
+	}
+	return uids, nil
 }

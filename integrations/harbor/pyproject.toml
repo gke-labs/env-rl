@@ -25,12 +25,15 @@ license = { text = "Apache-2.0" }
 requires-python = ">=3.12"  # what harbor requires
 # ate-env-rl is this repo's Python client (clients/python); if not yet on
 # PyPI, install it from the checkout first: pip install ./clients/python
-# harbor releases often; it is pinned to one minor and bumped deliberately,
-# with tests/test_trial.py (Harbor's own trial runner on this provider) as
-# the gate.
+# harbor releases often; the pin names the minors the suite passed on and
+# moves deliberately, with tests/test_trial.py (Harbor's own trial runner on
+# this provider) as the gate. uv.lock stays on 0.25: harbor 0.26 needs
+# fastmcp>=4.1.6 (mcp>=2.3), which the workspace's openhands-sdk (fastmcp<4)
+# and nemo-gym (mcp<2) refuse; see docs/plans/harbor (HB-27). The harbor-drift
+# workflow runs the suite on the newest accepted minor (HB-29).
 dependencies = [
   "ate-env-rl",
-  "harbor>=0.25,<0.26",
+  "harbor>=0.25,<0.27",
   "dockerfile-parse>=2.0.1",  # harbor's Dockerfile WORKDIR parser imports it lazily
 ]
 

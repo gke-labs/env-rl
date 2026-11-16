@@ -34,6 +34,7 @@ import (
 
 	"github.com/agent-substrate/env/internal/apiservice"
 	"github.com/agent-substrate/env/internal/ate"
+	"github.com/agent-substrate/env/internal/envstore"
 	"github.com/agent-substrate/env/internal/hostcheck"
 	"github.com/agent-substrate/env/internal/mcp"
 	"github.com/agent-substrate/env/internal/portproxy"
@@ -43,6 +44,8 @@ import (
 	ateenvv1alpha "github.com/agent-substrate/env/proto/ateenv/v1alpha"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 )
 
 func isLoopbackAddr(addr string) bool {
@@ -142,6 +145,9 @@ func main() {
 		maxStreams        = flag.Int("max-concurrent-streams", DefaultMaxConcurrentStreams, "most concurrent HTTP/2 streams (gRPC calls) one client connection may have open; calls beyond it queue in the client. Go's default is 250, which a single trainer process reaches with a few hundred sandboxes, because every exec holds a stream for the whole command and its wake")
 		enableTracing     = flag.Bool("enable-tracing", false, "export OpenTelemetry traces over OTLP/gRPC, configured by OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_EXPORTER_OTLP_INSECURE; incoming W3C trace context is continued and passed on to ateapi and the guests")
 		metricsAddr       = flag.String("metrics-listen-addr", "", "address to serve Prometheus metrics on, at /metrics, on a listener of its own, e.g. :9090; empty (the default) disables metrics. The listener has no authentication and no Host check: it serves request counts by method and code, atespace names with environment counts by state, and the build version to anyone who can reach it, so bind it where only trusted scrapers can")
+		environmentStore  = flag.String("environment-store", "", "where ate-env-api keeps the labels and the deadline of an environment, which Substrate has no field for: empty (the default) keeps none and makes no call to Kubernetes; \"configmaps\" keeps one ConfigMap for each such environment in the namespace of ate-env-api, which needs the Role that ate-env manifest --environment-metadata prints")
+		storeQPS          = flag.Float64("environment-store-qps", defaultEnvironmentStoreQPS, "with --environment-store=configmaps, the most requests per second this process sends to the Kubernetes API over time; a negative value sets no limit in the client and leaves the limit to the API server (API Priority and Fairness). client-go's own default, 5, is for a command-line tool: at that rate the object deletes of a fleet teardown wait inside DeleteEnvironment")
+		storeBurst        = flag.Int("environment-store-burst", defaultEnvironmentStoreBurst, "with --environment-store=configmaps, how many requests to the Kubernetes API this process can send at once before --environment-store-qps applies")
 		environmentsTTL   = flag.Duration("metrics-environments-ttl", telemetry.DefaultEnvironmentsCacheTTL, "how long ate_env_api_environments serves one read of the control plane (a ListActors per atespace) before a scrape reads it again")
 	)
 	flag.Parse()
@@ -156,6 +162,12 @@ func main() {
 			log.Fatal(exitErr)
 		}
 	}()
+
+	// Before the first call to the control plane: a wrong flag value must
+	// not wait for Substrate to fail.
+	if err := checkEnvironmentStoreFlags(*environmentStore, *storeQPS, *storeBurst); err != nil {
+		log.Fatal(err)
+	}
 
 	serviceHosts := serviceHostNames(*serviceName, os.ReadFile, os.Getenv)
 	if len(serviceHosts) > 0 {
@@ -334,6 +346,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// The store starts before the listener, thus no request sees a server
+	// whose store is not ready.
+	if *environmentStore == environmentStoreConfigMaps {
+		store, err := newEnvironmentStore(ctx, *storeQPS, *storeBurst)
+		if err != nil {
+			exitErr = fmt.Errorf("--environment-store: %w", err)
+			return
+		}
+		apisvc.Store = store
+		go store.RunSweep(ctx, apisvc.ActorUIDs, func(deleted int, err error) {
+			log.Printf("environment store: the orphan sweep deleted %d objects, error: %v", deleted, err)
+		})
+	}
+
 	// A metrics server that stops with an error stops the API server too.
 	// main returns after that, so the deferred functions run, and exits
 	// non-zero through exitErr.
@@ -389,6 +415,87 @@ func serveMetrics(addr string, handler http.Handler) (*http.Server, <-chan error
 		}
 	}()
 	return srv, errc, nil
+}
+
+// The rate limit of the environment store's Kubernetes client, set on
+// purpose: client-go's default (5 requests per second, a burst of 10) is for
+// a command-line tool, and the store deletes one object inside each
+// DeleteEnvironment of an environment that has one. At the default, 200 such
+// deletes at once serve 59 objects in the 10 s that DeleteEnvironment gives
+// the object delete and leave 141 to the orphan sweep; at these values all
+// 200 end in 2 s (measured against a local HTTP server).
+const (
+	defaultEnvironmentStoreQPS   = 50
+	defaultEnvironmentStoreBurst = 100
+)
+
+// environmentStoreConfigMaps is the value of --environment-store that turns
+// the store on.
+const environmentStoreConfigMaps = "configmaps"
+
+// checkEnvironmentStoreFlags checks the flags of the environment store. It
+// needs nothing but the flag values, thus main calls it before the first
+// call to the control plane.
+func checkEnvironmentStoreFlags(store string, qps float64, burst int) error {
+	switch store {
+	case "":
+		return nil
+	case environmentStoreConfigMaps:
+	default:
+		return fmt.Errorf("--environment-store %q: want %q or empty", store, environmentStoreConfigMaps)
+	}
+	// client-go reads a zero rate or burst as its own default, 5 and 10.
+	if qps == 0 {
+		return errors.New("--environment-store-qps 0: want a rate above zero, or a negative value for no limit in the client")
+	}
+	if qps > 0 && burst < 1 {
+		return fmt.Errorf("--environment-store-burst %d: want at least 1", burst)
+	}
+	return nil
+}
+
+// environmentStoreClientConfig returns config with the rate limit of the
+// environment store. A negative qps sets no limit in the client; the API
+// server's own limit (API Priority and Fairness) then is the only one.
+func environmentStoreClientConfig(config *rest.Config, qps float64, burst int) *rest.Config {
+	c := rest.CopyConfig(config)
+	if qps < 0 {
+		// client-go reads a negative QPS as "no client-side limit".
+		c.QPS, c.Burst = -1, 0
+		return c
+	}
+	c.QPS, c.Burst = float32(qps), burst
+	return c
+}
+
+// newEnvironmentStore returns the store on the ConfigMaps of the namespace
+// ate-env-api runs in, with its informer started. The namespace is
+// POD_NAMESPACE, else the ServiceAccount namespace file. A first list that
+// does not succeed in envstore.SyncTimeout is an error: the process then
+// ends, and does not wait without a listener.
+func newEnvironmentStore(ctx context.Context, qps float64, burst int) (*envstore.Store, error) {
+	namespace := strings.TrimSpace(os.Getenv("POD_NAMESPACE"))
+	if namespace == "" {
+		if b, err := os.ReadFile(podNamespacePath); err == nil {
+			namespace = strings.TrimSpace(string(b))
+		}
+	}
+	if namespace == "" {
+		return nil, errors.New("the namespace of ate-env-api is not known: set POD_NAMESPACE")
+	}
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("the Kubernetes API of the cluster: %w", err)
+	}
+	client, err := corev1client.NewForConfig(environmentStoreClientConfig(config, qps, burst))
+	if err != nil {
+		return nil, err
+	}
+	store := envstore.New(client.ConfigMaps(namespace), namespace)
+	if err := store.Run(ctx, envstore.SyncTimeout); err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 // grpcServerOptions returns the interceptor chain of the API's gRPC server.

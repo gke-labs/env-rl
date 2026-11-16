@@ -376,7 +376,7 @@ test = [
 requires-dist = [
     { name = "ate-env-rl", editable = "clients/python" },
     { name = "dockerfile-parse", specifier = ">=2.0.1" },
-    { name = "harbor", specifier = ">=0.25,<0.26" },
+    { name = "harbor", specifier = ">=0.25,<0.27" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=1.4.1.post1" },
 ]

@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
+import inspect
 import io
 import itertools
 import json
@@ -288,9 +289,23 @@ class AteEnvEnvironment(BaseEnvironment):
         either the check is skipped and the default endpoint is tried when the
         first trial starts.
         """
-        # Harbor 0.25's BaseEnvironment.preflight takes no kwargs; call
-        # super().preflight(kwargs) when the pin moves to 0.26.
+        # Harbor 0.26's base hook takes the kwargs and validates them against a
+        # declared options model (this provider declares none, thus its kwargs
+        # pass as they are); Harbor 0.25's takes no argument.
+        base = super().preflight
+        if "kwargs" in inspect.signature(base).parameters:
+            base(kwargs)
+        else:
+            base()
         options = kwargs or {}
+        # Harbor 0.26 decodes an --ek value as JSON (`--ek api_url=1234` is an
+        # int). Harbor's preflight runner reports a ValueError and ends cleanly.
+        for key in ("api_url", "api_token"):
+            value = options.get(key)
+            if value is not None and not isinstance(value, str):
+                raise ValueError(
+                    f"ate-env preflight: {key} must be a string, got {type(value).__name__}"
+                )
         api = options.get("api_url") or os.environ.get(API_ENV)
         token = options.get("api_token") or os.environ.get(TOKEN_ENV) or None
         if not api:
