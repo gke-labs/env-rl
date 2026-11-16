@@ -18,6 +18,12 @@ harbor run -p /path/to/task -a oracle -e ate_env_harbor:AteEnvEnvironment
 Harbor loads the class from the import path, so no change to Harbor is needed.
 Python 3.12 or newer (Harbor's floor); `ate-env-rl` from this checkout.
 
+The provider accepts Harbor 0.25 and 0.26 (`harbor>=0.25,<0.27`), and `pip`
+installs the newest of them. CI runs the tests on both: the "Harbor
+integration" job on the version in `uv.lock` (0.25), and the `harbor-drift`
+workflow on the newest accepted version (0.26), when a pull request changes
+this package or the Python client, and each week.
+
 ## Settings
 
 Each setting is a constructor kwarg and an `--ek key=value` flag (repeatable).

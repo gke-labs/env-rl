@@ -115,15 +115,30 @@ func TestListEnvironmentsReturnsOneAtespace(t *testing.T) {
 	if len(resp.GetEnvironments()) != 0 || resp.GetNextPageToken() != "" {
 		t.Errorf("ListEnvironments(empty) = %v, token %q, want no environments and no token", envIDs(resp.GetEnvironments()), resp.GetNextPageToken())
 	}
+
+	// An atespace that nobody created is not an error for a list, as in
+	// Substrate, whose scoped list does not check the atespace. A get in it
+	// is NotFound.
+	resp, err = client.ListEnvironments(ctx, &ateenvv1alpha.ListEnvironmentsRequest{Atespace: "never-created"})
+	if err != nil {
+		t.Fatalf("ListEnvironments(never-created): %v", err)
+	}
+	if len(resp.GetEnvironments()) != 0 || resp.GetNextPageToken() != "" {
+		t.Errorf("ListEnvironments(never-created) = %v, token %q, want no environments and no token", envIDs(resp.GetEnvironments()), resp.GetNextPageToken())
+	}
+	if _, err := client.GetEnvironment(ctx, &ateenvv1alpha.GetEnvironmentRequest{Id: "a", Atespace: "never-created"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetEnvironment in never-created = %v, want NotFound", err)
+	}
 }
 
 // TestListEnvironmentsAtespaceScope checks AE-11: with ListEnvironmentsAtespaces set, a
 // request for an atespace outside it is PermissionDenied and no list call
 // reaches Substrate. The default atespace is not implied. An atespace in the
-// set lists as before.
+// set lists as before, and one in the set that does not exist is an empty page
+// (AE-6).
 func TestListEnvironmentsAtespaceScope(t *testing.T) {
 	te := newFullTestEnv(t)
-	te.srv.ListEnvironmentsAtespaces = []string{"team-a"}
+	te.srv.ListEnvironmentsAtespaces = []string{"team-a", "never-created"}
 	ctx := context.Background()
 
 	want := seedActors(t, te.control, "team-a", "a", 2)
@@ -154,6 +169,16 @@ func TestListEnvironmentsAtespaceScope(t *testing.T) {
 	}
 	if got := envIDs(resp.GetEnvironments()); !slices.Equal(got, want) {
 		t.Errorf("ListEnvironments(team-a) = %v, want %v", got, want)
+	}
+
+	// A named atespace that nobody created is read, and Substrate has
+	// nothing in it: an empty page, not PermissionDenied and not NotFound.
+	resp, err = te.envClient.ListEnvironments(ctx, &ateenvv1alpha.ListEnvironmentsRequest{Atespace: "never-created"})
+	if err != nil {
+		t.Fatalf("ListEnvironments(never-created): %v", err)
+	}
+	if len(resp.GetEnvironments()) != 0 || resp.GetNextPageToken() != "" {
+		t.Errorf("ListEnvironments(never-created) = %v, token %q; want an empty page", envIDs(resp.GetEnvironments()), resp.GetNextPageToken())
 	}
 }
 

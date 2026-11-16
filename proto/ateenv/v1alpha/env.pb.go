@@ -878,7 +878,12 @@ func (x *GetEnvironmentResponse) GetEnvironment() *Environment {
 // Request for one page of the environments of one atespace.
 type ListEnvironmentsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Substrate atespace to list (defaults to "ate-env").
+	// Substrate atespace to list (defaults to "ate-env"). An atespace that does
+	// not exist is not an error: the response is an empty page with no token,
+	// the same as for an atespace that has no environments. GetEnvironment in
+	// such an atespace is NOT_FOUND. The server lists only the atespaces that
+	// its -list-environments-atespaces flag names (the default atespace alone
+	// by default): another atespace is PERMISSION_DENIED, before any read.
 	Atespace string `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	// Number of environments the server reads from Substrate for this page. 0
 	// means the server default, 100. The server asks Substrate for at most

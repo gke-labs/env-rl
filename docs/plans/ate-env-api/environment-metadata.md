@@ -1,8 +1,10 @@
 # Plan: labels and a time to live on an environment
 
 Status: proposal, 2026-11-13, checked against `main` at `456353fd` and Substrate at the pin
-(`274605f1`) and at its `main` (`cf5768a0`). Nothing here is built. Issues: #386 (time to live),
-#387 (labels; its first part, `ListEnvironments`, is a pull request of its own). The criteria are in
+(`274605f1`) and at its `main` (`cf5768a0`). Pull request 1, the store, is #407; the rest is not
+built. Decided on 2026-11-15: EM-E (the actor first) and EM-F (a read from the API server before
+each delete by deadline). Issues: #386 (time to live), #387 (labels; its first part,
+`ListEnvironments`, is a pull request of its own). The criteria are in
 [acceptance-criteria.md](./acceptance-criteria.md), group `EM`.
 
 ## 1. Goal
@@ -49,24 +51,37 @@ at most 256 bytes of UTF-8.
 
 The actor decides that an environment exists. The object only adds to it.
 
-- Create: write the object, then create the actor. If the actor is not created, delete the object.
-- Delete: delete the actor, then the object.
-- A crash between the two writes leaves an object without an actor. The sweep deletes an object
-  whose actor is gone, or has another uid, once the object is older than a grace period.
+- Create (EM-E, decided): create the actor, then write the object once, with the uid of the actor.
+  If that write fails, delete the actor with its uid as the precondition and fail the create.
+- Delete: read the object from the informer, delete the actor, then delete that object with its uid
+  and resource version as the precondition. An environment with no object in the informer costs no
+  call to Kubernetes; an object that the informer did not have yet is an orphan for the sweep.
+- A write never deletes. When an object of the name exists, the write returns that object, as the
+  API server has it, and the create path decides: an object of the same actor is an earlier write of
+  this environment; for an object of another actor the create path reads the actor again. When the
+  actor of the write is the one that exists, the object is of an earlier environment with the same
+  id, and the create path writes over it. When it is not, the write is late (its environment was
+  deleted and the id created again while the write waited), and the create path drops it.
+- Replace: the write over an object deletes that object with its uid and resource version as the
+  precondition and creates a new one, thus the new object has its own create time for the grace
+  period. An object that was written again since stays, and the write fails.
+- A crash between the two writes of a create leaves an actor without an object: an environment
+  without the labels or the deadline that its caller asked for, which is what each environment is
+  today. A crash between the two writes of a delete leaves an object without an actor. The sweep
+  deletes an object whose actor is gone, or has another uid, once the object is older than a grace
+  period (1 minute).
 - An actor without an object is an environment with no labels and no deadline.
 
 Substrate assigns the uid and the create time of an actor in `CreateActor` and ignores both on input
 (`ResourceMetadata` in `api/ateapi/v1/ateapi.proto`). The call returns the actor, in the state
-`SUSPENDED`. Thus, with the order above, the first write of the object cannot hold the `uid`, and it
-cannot hold an `expire_time` that is counted from the actor's create time. The object needs a second
-write after `CreateActor`, and a crash between the two leaves an object with no `uid` next to a live
-actor. The orphan rule above must not delete that object: it would take the labels and the deadline
-from a live environment. The other order (the actor first, then one write of the object with the
-`uid`, and a delete of the actor with its uid as the precondition when that write fails) has no
-second write; its crash window leaves an actor without an object, thus an environment without the
-deadline that its caller asked for. The order is open point EM-E. Today
-`internal/ate.Client.CreateActor` drops the actor that `CreateActor` returns; pull request 1 keeps
-its uid in either order.
+`SUSPENDED`. Thus an object that is written before the actor cannot hold the `uid`, or an
+`expire_time` that is counted from the actor's create time: it needs a second write after
+`CreateActor`, and a crash between the two leaves an object with no `uid` next to a live actor,
+which the orphan rule must then not delete. That is why EM-E chose the other order: the actor first,
+then one write of the object with the `uid`. Its crash window leaves an actor without an object,
+thus an environment without the deadline that its caller asked for.
+`internal/ate.Client.CreateActor` returns the actor that `CreateActor` returns (since #392, which
+reads its `create_time`); the pull request that adds the first create field keeps its uid.
 
 ### The sweep
 
@@ -97,16 +112,28 @@ as it stands has no leader election. The deadline is honoured within one sweep i
 
 The uid does not cover one case: a `SetEnvironmentTimeToLive` on one replica moves the deadline of
 the same actor, and the sweep of another replica, on an informer that does not have the change yet,
-sees the earlier deadline as past and deletes the environment. What closes this window (a read of
-the object from the API server before each delete by deadline, or a `Lease` that lets one replica
-sweep, which also makes the Substrate reads once and not once for each replica) is open point EM-F.
+sees the earlier deadline as past. EM-F closes this window: before each delete by deadline, the
+sweep reads the object from the API server, and deletes only when that copy is past its deadline
+too. Each replica still sweeps, and each reads Substrate for orphans; there is no `Lease`.
 
 ### Opt-in, with its own permission
 
 The store is off by default: `--environment-store=configmaps` on `ate-env-api` turns it on.
 `ate-env manifest --environment-metadata` sets the flag and adds what it needs: a Role and a
-RoleBinding for `get`, `list`, `watch`, `create`, `update` and `delete` on ConfigMaps in the
-namespace of `ate-env-api`, and the Kubernetes API token in the pod.
+RoleBinding for `list`, `watch`, `create` and `delete` on ConfigMaps in the namespace of
+`ate-env-api`, and the Kubernetes API token in the pod. These are the calls the store makes: its
+informer lists and watches, and a write creates and deletes. The pull request that reads an object
+from the API server before a delete by deadline (EM-F) adds `get`.
+
+The store's Kubernetes client has a rate limit of its own: 50 requests per second with a burst of
+100, on each replica (`--environment-store-qps`, `--environment-store-burst`; a negative rate sets
+no limit in the client and leaves it to API Priority and Fairness). The default of client-go, 5 per
+second with a burst of 10, is for a command-line tool. `DeleteEnvironment` deletes the object inside
+the RPC, with 10 s for that call. Measured against a local HTTP server with 200 such deletes at
+once: at the default of client-go, 59 objects are deleted in those 10 s and 141 deletes fail at once
+and wait for the sweep; at 50 and 100, all 200 end in 2 s. A measurement on a cluster, create and
+delete p50 and p95 of a fleet teardown with the store on against the store off, comes with the pull
+request that writes objects.
 
 Without the store, a request that carries labels or a time to live is refused with
 `FailedPrecondition`, and `GetServerInfo` says that the features are off. It is never accepted and
@@ -163,21 +190,21 @@ when one does.
 | Pull request | Content                                                                                                               | After                 |
 | ------------ | --------------------------------------------------------------------------------------------------------------------- | --------------------- |
 | this         | This plan and the `EM` criteria                                                                                       |                       |
-| 1            | The store: the flag, the manifest switch with the Role, the informer, the object for an environment, the orphan sweep | this                  |
+| 1 (#407)     | The store: the flag, the manifest switch with the Role, the informer, the object for an environment, the orphan sweep | this                  |
 | 2            | Labels: the create field, get, the list filter; Go and Python clients                                                 | 1, `ListEnvironments` |
 | 3            | The time to live: the create field, `SetEnvironmentTimeToLive`, the deadline sweep; Go and Python clients             | 1                     |
 | 4            | `ate_env_e2b`: `metadata`, `Sandbox.list`, `timeout`, `set_timeout` (E2B-31, E2B-32)                                  | 2, 3                  |
 
 ## 7. Open points
 
-| ID   | Point                                                                                                                                                                                                                                                                                                                                                                                                       | Proposal                                                     |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| EM-A | The object kind: ConfigMap, or a CRD of our own                                                                                                                                                                                                                                                                                                                                                             | ConfigMap: no cluster-scoped install, and the data is small  |
-| EM-B | The default of E2B's `timeout` in `ate_env_e2b` when the store is off                                                                                                                                                                                                                                                                                                                                       | Keep today's warning; with the store on, E2B's 300 s default |
-| EM-C | Whether the deadline moves when the environment is used (E2B does not move it; #76 asks for idle)                                                                                                                                                                                                                                                                                                           | No: a fixed deadline. Idle suspend stays #76                 |
-| EM-D | What a read on one replica gives right after a write on another: the informer's copy alone (then `EM-4` holds only after the watch delay), or a fallback for a miss on a young actor (a read from the API server's watch cache), with the uid of the object compared with the uid of the actor on each read                                                                                                 | Open                                                         |
-| EM-E | The order of the two writes of a create. Object first: a second write for the `uid`, and a rule for an object with no `uid` and a live actor. Actor first: one write, a rollback with `DeleteOptions.uid`, and a crash window that leaves a live environment with no deadline. With it: `expire_time` counted from the actor's create time (`EM-9` today) or from the clock of `ate-env-api` at the request | Open                                                         |
-| EM-F | How the sweep is safe against a late informer after `SetEnvironmentTimeToLive`, and how many replicas read Substrate for orphans: each replica sweeps from its informer (the plan as it stands), a read of the object from the API server before each delete by deadline, or one sweeper behind a `coordination.k8s.io` `Lease` (one more Role rule)                                                        | Open                                                         |
-| EM-G | A list with a label selector in a large atespace: filter each Substrate page (the plan as it stands; many empty pages), resolve the matching ids from the informer and read those actors, or read Substrate pages inside one call up to a budget of actors                                                                                                                                                  | Open                                                         |
-| EM-H | Whether labels and the time to live turn on together. One switch (the plan as it stands) with EM-B gives each E2B caller with no `timeout` a 300 s lifetime when the store is turned on; the other choices are two switches with two answers in `GetServerInfo`, or one switch and a default in `ate_env_e2b` that does not follow it                                                                       | Open                                                         |
-| EM-I | An environment whose delete by deadline Substrate refuses for good, such as a `CRASHED` actor after a resume that failed: the sweep tries on each interval without end, or stops after a number of tries; the object stays or goes; which metric or log reports it                                                                                                                                          | Open                                                         |
+| ID   | Point                                                                                                                                                                                                                                                                                                                                                                                                       | Proposal                                                                                                                                                          |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| EM-A | The object kind: ConfigMap, or a CRD of our own                                                                                                                                                                                                                                                                                                                                                             | ConfigMap: no cluster-scoped install, and the data is small                                                                                                       |
+| EM-B | The default of E2B's `timeout` in `ate_env_e2b` when the store is off                                                                                                                                                                                                                                                                                                                                       | Keep today's warning; with the store on, E2B's 300 s default                                                                                                      |
+| EM-C | Whether the deadline moves when the environment is used (E2B does not move it; #76 asks for idle)                                                                                                                                                                                                                                                                                                           | No: a fixed deadline. Idle suspend stays #76                                                                                                                      |
+| EM-D | What a read on one replica gives right after a write on another: the informer's copy alone (then `EM-4` holds only after the watch delay), or a fallback for a miss on a young actor (a read from the API server's watch cache), with the uid of the object compared with the uid of the actor on each read                                                                                                 | Open                                                                                                                                                              |
+| EM-E | The order of the two writes of a create. Object first: a second write for the `uid`, and a rule for an object with no `uid` and a live actor. Actor first: one write, a rollback with `DeleteOptions.uid`, and a crash window that leaves a live environment with no deadline. With it: `expire_time` counted from the actor's create time (`EM-9` today) or from the clock of `ate-env-api` at the request | Decided 2026-11-15: the actor first, one write of the object with the uid, a rollback with `DeleteOptions.uid`; `expire_time` counts from the actor's create time |
+| EM-F | How the sweep is safe against a late informer after `SetEnvironmentTimeToLive`, and how many replicas read Substrate for orphans: each replica sweeps from its informer (the plan as it stands), a read of the object from the API server before each delete by deadline, or one sweeper behind a `coordination.k8s.io` `Lease` (one more Role rule)                                                        | Decided 2026-11-15: each replica sweeps from its informer, and reads the object from the API server before each delete by deadline; no `Lease`                    |
+| EM-G | A list with a label selector in a large atespace: filter each Substrate page (the plan as it stands; many empty pages), resolve the matching ids from the informer and read those actors, or read Substrate pages inside one call up to a budget of actors                                                                                                                                                  | Open                                                                                                                                                              |
+| EM-H | Whether labels and the time to live turn on together. One switch (the plan as it stands) with EM-B gives each E2B caller with no `timeout` a 300 s lifetime when the store is turned on; the other choices are two switches with two answers in `GetServerInfo`, or one switch and a default in `ate_env_e2b` that does not follow it                                                                       | Open                                                                                                                                                              |
+| EM-I | An environment whose delete by deadline Substrate refuses for good, such as a `CRASHED` actor after a resume that failed: the sweep tries on each interval without end, or stops after a number of tries; the object stays or goes; which metric or log reports it                                                                                                                                          | Open                                                                                                                                                              |

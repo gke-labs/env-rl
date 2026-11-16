@@ -905,6 +905,90 @@ func TestE2EFullStack(t *testing.T) {
 		e2eWaitUntilDeleted(t, ctx, sb, 60*time.Second)
 	})
 
+	// ListEnvironments against the real control plane: Substrate's page token
+	// goes to the caller and back, create_time comes from the actor, and an
+	// atespace that the server does not list is refused. test_full_stack.py also
+	// checks a status filter on a suspended environment.
+	t.Run("list_environments", func(t *testing.T) {
+		client := newAPIClient(t)
+		ctx := t.Context()
+		run := e2eRandomHex(t, 4)
+		want := map[string]bool{}
+		for i := range 2 {
+			envID := fmt.Sprintf("goe2e-list-%s-%d", run, i)
+			sb, err := client.Create(ctx, &ateenvv1alpha.CreateEnvironmentRequest{
+				Id:       envID,
+				Atespace: reqAtespace,
+				Template: e2eOptionalTemplate(templateName),
+			})
+			if err != nil {
+				t.Fatalf("Create(%q): %v", envID, err)
+			}
+			t.Cleanup(func() {
+				delCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				if err := e2eDeleteEnv(delCtx, sb); err != nil && !errors.Is(err, env.ErrNotFound) {
+					t.Errorf("cleanup delete of %s failed: %v", envID, err)
+				}
+			})
+			want[envID] = false
+		}
+
+		// One environment for each read, so the walk needs a token.
+		token := ""
+		seenTokens := map[string]bool{}
+		for {
+			resp, err := client.List(ctx, &ateenvv1alpha.ListEnvironmentsRequest{Atespace: reqAtespace, PageSize: 1, PageToken: token})
+			if err != nil {
+				t.Fatalf("List(page_token=%q): %v", token, err)
+			}
+			for _, listed := range resp.GetEnvironments() {
+				seen, ours := want[listed.GetId()]
+				if !ours {
+					continue
+				}
+				if seen {
+					t.Errorf("List returned %s twice", listed.GetId())
+				}
+				want[listed.GetId()] = true
+				if listed.GetAtespace() != wantAtespace {
+					t.Errorf("listed %s atespace = %q, want %q", listed.GetId(), listed.GetAtespace(), wantAtespace)
+				}
+				got, err := client.Get(ctx, reqAtespace, listed.GetId())
+				if err != nil {
+					t.Fatalf("Get(%s): %v", listed.GetId(), err)
+				}
+				if listed.GetCreateTime() == nil || !listed.GetCreateTime().AsTime().Equal(got.GetCreateTime().AsTime()) {
+					t.Errorf("listed %s create_time = %v, Get reports %v", listed.GetId(), listed.GetCreateTime(), got.GetCreateTime())
+				}
+			}
+			token = resp.GetNextPageToken()
+			if token == "" {
+				break
+			}
+			if seenTokens[token] {
+				t.Fatalf("next_page_token %q came twice", token)
+			}
+			seenTokens[token] = true
+		}
+		for id, seen := range want {
+			if !seen {
+				t.Errorf("List did not return %s", id)
+			}
+		}
+
+		// The e2e target deploys ate-env-api without
+		// -list-environments-atespaces, thus the server lists the default
+		// atespace alone (AE-11) and refuses another one before the read.
+		// The empty page of a named atespace that does not exist (AE-6) is
+		// in TestListEnvironmentsAtespaceScope.
+		missing := "goe2e-no-atespace-" + run
+		_, err := client.List(ctx, &ateenvv1alpha.ListEnvironmentsRequest{Atespace: missing})
+		if !errors.Is(err, env.ErrPermissionDenied) || status.Code(err) != codes.PermissionDenied {
+			t.Errorf("List(atespace %q): err = %v (code %v), want ErrPermissionDenied / PermissionDenied", missing, err, status.Code(err))
+		}
+	})
+
 	t.Run("create_from_image_rejects_unpinned_image", func(t *testing.T) {
 		client := newAPIClient(t)
 		id := "goe2e-img-" + e2eRandomHex(t, 4)

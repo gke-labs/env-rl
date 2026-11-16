@@ -7,6 +7,15 @@ user needs to know across them.
 ## Unreleased
 
 ### Changed
+- Harbor provider: `ate-env-harbor` accepts Harbor 0.26 next to 0.25
+  (`harbor>=0.25,<0.27`). On 0.26, `preflight` passes the job's `--ek` kwargs
+  to Harbor's base hook, and refuses an `api_url` or `api_token` kwarg that
+  is not a string with `ValueError`. The repository's lock, and thus the
+  "Harbor integration" CI job, stays on Harbor 0.25 (see `docs/plans/harbor`,
+  HB-27). The new `harbor-drift` workflow (`hack/ci/harbor-drift.sh`) runs
+  the provider's tests on the newest Harbor inside the bounds, outside the uv
+  workspace: on a pull request that changes the provider or the Python
+  client, each week, and on demand (HB-29).
 - Go client: the install steps in `clients/go/README.md` set
   `GOPRIVATE=github.com/ai-on-gke/*`, because the repository is private.
   Without it, `go mod tidy` takes `@main` from `proxy.golang.org`, which
@@ -45,6 +54,19 @@ user needs to know across them.
   on `CreateEnvironment`, `GetEnvironment` and `ListEnvironments`. Python:
   `EnvironmentInfo.create_time`, a UTC `datetime`, or `None` from a server
   that predates the field.
+- ate-env-api: the environment store, off by default
+  (`--environment-store=configmaps`; `ate-env manifest
+  --environment-metadata` adds the flag, a Role and a RoleBinding on the
+  ConfigMaps of the namespace, and the Kubernetes API token in the pod). It
+  is where the labels and the deadline of an environment go, which Substrate
+  has no field for: one ConfigMap for each such environment. This release has
+  the store, the delete of the object with its environment, and a sweep that
+  removes an object whose actor is gone or has another uid. No API field
+  writes labels or a deadline yet. The Role grants `list`, `watch`, `create`
+  and `delete`, the calls the store makes. The store's Kubernetes client has
+  a rate limit of its own, `--environment-store-qps` (default 50) and
+  `--environment-store-burst` (default 100), not the 5 per second of
+  client-go's default.
 - `examples/e2b-envd-layer`: an E2B-compatible sandbox from any image, with
   upstream envd as an added runtime layer. `demo.sh` builds the layer,
   registers the base template and runs an E2B SDK program on two images.

@@ -56,7 +56,7 @@ Non-goals:
 | A credential the daemon never sees | `X-Env-Authorization`; the proxy checks and removes it, and forwards `Authorization`     |
 | create, kill, pause, resume        | `CreateEnvironment`, `DeleteEnvironment`, `SuspendEnvironment`, wake on the next request |
 | Template ID to image               | A registered template by name, or `rootfs_image` on a base template (derived template)   |
-| List, metadata                     | Missing: no list RPC, no labels on an environment                                        |
+| List, metadata                     | `ListEnvironments` lists one atespace (#392). Missing: no labels on an environment       |
 | Timeout (kill after N seconds)     | Missing: no time to live (#76 covers auto-suspend only)                                  |
 | `get_host(port)` hostname          | Missing: the port proxy has header and path forms, no hostname form                      |
 | Egress rules                       | Missing: no per-environment network policy                                               |
@@ -163,7 +163,7 @@ proxy's answer, and `integrations/e2b/README.md` documents which exception that 
 | `get_info`, `is_running`                                    | `GetEnvironment`; envd `/health` only on a running environment  |
 | `commands.*`, `pty.*`, `files.*`, `git.*`                   | Inherited: envd through the port proxy                          |
 | `timeout`, `set_timeout`                                    | Refused or warned (D-2) until an environment has a time to live |
-| `metadata`, `Sandbox.list`                                  | Refused until environments have labels and a list RPC           |
+| `metadata`, `Sandbox.list`                                  | Refused until environments have labels (the list RPC is #392)   |
 | `get_host`, `download_url`, `upload_url`                    | Refused until the port proxy has a hostname form                |
 | `allow_internet_access=False`, `network`, `update_network`  | Refused: needs per-environment egress policy in Substrate       |
 | Forks, snapshots, metrics, volumes, MCP, `iam`, `lifecycle` | Refused: no equivalent                                          |
@@ -221,7 +221,7 @@ images that run as root. Group V of the criteria has the results that are criter
 | 2 (#365)     | `ate_env_e2b.Sandbox`, `AsyncSandbox` if it stays thin, the Kind test of the class  | 1     |
 | core         | The opt-in wake hold of the port proxy: a separate core pull request, with an issue |       |
 | later        | Environment time to live: API field, enforcement, `timeout` and `set_timeout`       | 2     |
-| later        | Environment labels and `ListEnvironments`: `metadata`, `Sandbox.list`               | 2     |
+| later        | Environment labels (`ListEnvironments` is #392): `metadata`, `Sandbox.list`         | 2     |
 | later        | Hostname form on the port proxy: `get_host`, signed file URLs                       | 2     |
 | #390         | The scheduled drift job (section 7)                                                 | 2     |
 

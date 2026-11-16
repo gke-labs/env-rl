@@ -37,6 +37,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -143,6 +144,11 @@ type manifestConfig struct {
 	// (ate-env-api's -list-environments-atespaces); empty leaves the
 	// server default.
 	listAtespaces string
+	// environmentMetadata turns on ate-env-api's store for the labels and
+	// the deadline of an environment: the server flag, a Role and a
+	// RoleBinding on ConfigMaps in the namespace, and the Kubernetes API
+	// token in the pod.
+	environmentMetadata bool
 	// allowedHosts are host names, next to the Service's in-cluster names,
 	// that HTTP callers may send to ate-env-api (its -allowed-hosts).
 	allowedHosts []string
@@ -539,6 +545,7 @@ the "template" subcommand: ate-env manifest template`,
 	cmd.Flags().StringVar(&mCfg.authTokenSecret, "auth-token-secret", defaultAuthTokenSecret, "Kubernetes Secret (key 'token') mounted into ate-env-api; its value is the bearer token ate-env-api requires from callers. Create it with 'ate-env manifest auth-secret'")
 	cmd.Flags().BoolVar(&mCfg.insecureNoAuth, "insecure-no-auth", false, "deploy ate-env-api without a caller token: anyone who can reach its Service can create environments, run commands in them and reach their ports")
 	cmd.Flags().StringVar(&mCfg.listAtespaces, "list-environments-atespaces", "", "comma-separated atespaces whose environments ate-env-api's ListEnvironments returns, or * for any (defaults to ate-env)")
+	cmd.Flags().BoolVar(&mCfg.environmentMetadata, "environment-metadata", false, "let ate-env-api keep the labels and the deadline of an environment, which Substrate has no field for, in one ConfigMap for each such environment in its namespace (--environment-store=configmaps). This gives ate-env-api what it does not have by default: the Kubernetes API token in its pod, and a Role to list, watch, create and delete the ConfigMaps of the namespace. Limits: docs/security/threat-model.md")
 	cmd.Flags().StringVar(&mCfg.portProxyAtespaces, "port-proxy-atespaces", "", "comma-separated atespaces whose environments ate-env-api's port proxy forwards to, or * for any (defaults to ate-env)")
 	cmd.Flags().StringSliceVar(&mCfg.allowedHosts, "api-allowed-hosts", nil, "extra host names that HTTP clients may use to reach ate-env-api, e.g. an internal load balancer name (a leading *. allows the names below it); the Service's in-cluster names, in the cluster's own DNS domain, IP addresses and localhost are always allowed")
 	cmd.Flags().BoolVar(&mCfg.routerTLS, "api-router-tls", true, "mount the pod identity certificate and the servicedns trust bundle into ate-env-api and dial the atenet router's TLS listeners, the only ones Substrate serves since v0.6.0; the API's SPIFFE ID must then be in the router's --ingress-allowed-spiffe-ids. Off, the API dials the plaintext addresses, which only the test fakes serve")
@@ -735,13 +742,55 @@ It prints YAML to stdout without touching the cluster.`,
 // buildManifests returns the Kubernetes objects that make up a deployment,
 // in apply order.
 func buildManifests(cfg manifestConfig) []any {
-	return []any{
+	objs := []any{
 		buildNamespace(cfg),
 		buildWorkerPool(cfg),
 		buildAPIServiceAccount(cfg),
+	}
+	if cfg.environmentMetadata {
+		role, binding := buildEnvironmentStoreRole(cfg)
+		objs = append(objs, role, binding)
+	}
+	return append(objs,
 		buildAPIDeployment(cfg),
 		buildAPIService(cfg),
+	)
+}
+
+// environmentStoreRoleName names the Role and the RoleBinding of ate-env-api's
+// environment store.
+const environmentStoreRoleName = apiName + "-environment-store"
+
+// buildEnvironmentStoreRole returns what ate-env-api's environment store
+// needs from Kubernetes (internal/envstore): a Role on the ConfigMaps of the
+// namespace, and its binding to ate-env-api's ServiceAccount. The store keeps
+// one ConfigMap for each environment that has a label or a deadline, with a
+// name it derives from the environment, thus the Role cannot name them:
+// Kubernetes RBAC restricts create, list and watch by kind, not by name.
+func buildEnvironmentStoreRole(cfg manifestConfig) (*rbacv1.Role, *rbacv1.RoleBinding) {
+	meta := metav1.ObjectMeta{
+		Name:      environmentStoreRoleName,
+		Namespace: cfg.namespace,
+		Labels:    map[string]string{"app": apiName},
 	}
+	role := &rbacv1.Role{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "Role"},
+		ObjectMeta: meta,
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups: []string{""},
+			Resources: []string{"configmaps"},
+			// The calls internal/envstore makes (envstore.Verbs), and no
+			// other: it reads from its informer and never updates an object.
+			Verbs: []string{"list", "watch", "create", "delete"},
+		}},
+	}
+	binding := &rbacv1.RoleBinding{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
+		ObjectMeta: meta,
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: environmentStoreRoleName},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: apiName, Namespace: cfg.namespace}},
+	}
+	return role, binding
 }
 
 // apiPrincipal is the identity ate-env-api presents to the Substrate control
@@ -1063,7 +1112,9 @@ func buildTemplate(cfg templateConfig) (*ateapipb.ActorTemplate, error) {
 // buildAPIDeployment returns the ate-env-api Deployment, pointed at the
 // in-cluster Substrate endpoints.
 func buildAPIDeployment(cfg manifestConfig) *appsv1.Deployment {
-	automountAPIToken := false
+	// The pod has no Kubernetes API token unless the environment store is
+	// on: the store is ate-env-api's only caller of the Kubernetes API.
+	automountAPIToken := cfg.environmentMetadata
 	labels := map[string]string{"app": apiName}
 	replicas := cfg.apiReplicas
 	tokenExpiration := int64(7200)
@@ -1145,6 +1196,9 @@ func buildAPIDeployment(cfg manifestConfig) *appsv1.Deployment {
 	}
 	if a := strings.TrimSpace(cfg.listAtespaces); a != "" {
 		args = append(args, "-list-environments-atespaces="+a)
+	}
+	if cfg.environmentMetadata {
+		args = append(args, "-environment-store=configmaps")
 	}
 	ports := []corev1.ContainerPort{{ContainerPort: cfg.apiPort}}
 	var podAnnotations map[string]string

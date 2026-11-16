@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/agent-substrate/env/internal/apiservice"
+	"github.com/agent-substrate/env/internal/envstore"
 	"github.com/agent-substrate/env/internal/hostcheck"
 	"github.com/agent-substrate/env/internal/portproxy"
 	"github.com/agent-substrate/env/internal/sidecarenv"
@@ -31,6 +32,7 @@ import (
 	atev1 "go.ate.dev/substrate/api/infra/k8s/ate/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -1514,6 +1516,83 @@ func TestManifestTemplateCommandRejectsBadCapability(t *testing.T) {
 		if strings.Contains(out.String(), "containers:") {
 			t.Errorf("execute with --add-capability=%s printed a template:\n%s", name, out.String())
 		}
+	}
+}
+
+// TestManifestEnvironmentMetadata checks the manifest half of EM-2: without
+// --environment-metadata the manifests have no Role, no RoleBinding, no
+// Kubernetes API token in the pod and no store flag; with it they have all
+// four, for ConfigMaps of ate-env-api's namespace only. The Role grants the
+// verbs that the store uses (envstore.Verbs, which a test of the store holds
+// to the calls it makes) and no other.
+func TestManifestEnvironmentMetadata(t *testing.T) {
+	deployment := func(objs []any) *appsv1.Deployment {
+		t.Helper()
+		for _, o := range objs {
+			if d, ok := o.(*appsv1.Deployment); ok {
+				return d
+			}
+		}
+		t.Fatal("no Deployment")
+		return nil
+	}
+
+	cfg := testManifestConfig()
+	off := buildManifests(cfg)
+	for _, o := range off {
+		switch o.(type) {
+		case *rbacv1.Role, *rbacv1.RoleBinding, *rbacv1.ClusterRole, *rbacv1.ClusterRoleBinding:
+			t.Errorf("without --environment-metadata: the manifests have a %T", o)
+		}
+	}
+	pod := deployment(off).Spec.Template.Spec
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Error("without --environment-metadata: the pod mounts the Kubernetes API token")
+	}
+	if slices.ContainsFunc(pod.Containers[0].Args, func(a string) bool { return strings.Contains(a, "environment-store") }) {
+		t.Errorf("without --environment-metadata: args = %v, want no store flag", pod.Containers[0].Args)
+	}
+
+	cfg.environmentMetadata = true
+	on := buildManifests(cfg)
+	var role *rbacv1.Role
+	var binding *rbacv1.RoleBinding
+	for _, o := range on {
+		switch v := o.(type) {
+		case *rbacv1.Role:
+			role = v
+		case *rbacv1.RoleBinding:
+			binding = v
+		case *rbacv1.ClusterRole, *rbacv1.ClusterRoleBinding:
+			t.Errorf("the store needs no cluster-wide permission, got a %T", o)
+		}
+	}
+	if role == nil || binding == nil {
+		t.Fatalf("with --environment-metadata: role = %v, binding = %v, want both", role, binding)
+	}
+	if role.Namespace != cfg.namespace || len(role.Rules) != 1 {
+		t.Fatalf("role = %+v, want one rule in namespace %s", role, cfg.namespace)
+	}
+	rule := role.Rules[0]
+	if !slices.Equal(rule.APIGroups, []string{""}) || !slices.Equal(rule.Resources, []string{"configmaps"}) ||
+		!slices.Equal(rule.Verbs, envstore.Verbs) {
+		t.Errorf("rule = %+v, want the verbs the store uses, %v, on configmaps and no other", rule, envstore.Verbs)
+	}
+	if binding.Namespace != cfg.namespace || binding.RoleRef.Kind != "Role" || binding.RoleRef.Name != role.Name ||
+		len(binding.Subjects) != 1 || binding.Subjects[0].Kind != "ServiceAccount" ||
+		binding.Subjects[0].Name != apiName || binding.Subjects[0].Namespace != cfg.namespace {
+		t.Errorf("binding = %+v, want the Role bound to ate-env-api's ServiceAccount", binding)
+	}
+	pod = deployment(on).Spec.Template.Spec
+	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
+		t.Error("with --environment-metadata: the pod does not mount the Kubernetes API token")
+	}
+	if !slices.Contains(pod.Containers[0].Args, "-environment-store=configmaps") {
+		t.Errorf("with --environment-metadata: args = %v, want -environment-store=configmaps", pod.Containers[0].Args)
+	}
+	// The Deployment needs the namespace to place the objects.
+	if !slices.ContainsFunc(pod.Containers[0].Env, func(e corev1.EnvVar) bool { return e.Name == "POD_NAMESPACE" }) {
+		t.Error("with --environment-metadata: the container has no POD_NAMESPACE")
 	}
 }
 
