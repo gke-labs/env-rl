@@ -734,25 +734,26 @@ Available Commands:
   template      Generate Substrate ActorTemplate manifest
 
 Flags:
-      --api-allowed-hosts strings     extra host names that HTTP clients may use to reach ate-env-api, e.g. an internal load balancer name (a leading *. allows the names below it); the Service's in-cluster names, in the cluster's own DNS domain, IP addresses and localhost are always allowed
-      --api-image string              digest-pinned ate-env-api image for the API service (required: this ate-env was built from source; release binaries default to the image published with the release, see docs/release.md)
-      --api-port int32                port the ate-env-api service listens on (default 7777)
-      --api-replicas int32            number of API service replicas (default 1)
-      --api-router-tls                mount the pod identity certificate and the servicedns trust bundle into ate-env-api and dial the atenet router's TLS listeners, the only ones Substrate serves since v0.6.0; the API's SPIFFE ID must then be in the router's --ingress-allowed-spiffe-ids. Off, the API dials the plaintext addresses, which only the test fakes serve (default true)
-      --ateom-image string            alias for --worker-image, kept from before Substrate renamed ateom to ateworker
-      --auth-token-secret string      Kubernetes Secret (key 'token') mounted into ate-env-api; its value is the bearer token ate-env-api requires from callers. Create it with 'ate-env manifest auth-secret' (default "ate-env-api-token")
-      --enable-tracing                run ate-env-api with --enable-tracing, exporting OpenTelemetry traces over OTLP/gRPC
-  -h, --help                          help for manifest
-      --insecure-no-auth              deploy ate-env-api without a caller token: anyone who can reach its Service can create environments, run commands in them and reach their ports
-      --metrics-port int32            port ate-env-api serves Prometheus metrics on (--metrics-listen-addr), exposed on the container and the Service as "metrics" with prometheus.io scrape annotations; 0 leaves metrics off. The metrics listener has no authentication and no Host check
-      --namespace string              Kubernetes namespace to deploy into (default "ate-env")
-      --otlp-endpoint string          OTLP/gRPC collector endpoint for ate-env-api's traces, set as OTEL_EXPORTER_OTLP_ENDPOINT, e.g. http://otel-collector.observability:4317
-      --otlp-insecure                 set OTEL_EXPORTER_OTLP_INSECURE=true: talk to the collector in plaintext
-      --port-proxy-atespaces string   comma-separated atespaces whose environments ate-env-api's port proxy forwards to, or * for any (defaults to ate-env)
-      --replicas int32                number of pre-warmed worker pods (default 5)
-      --template string               ActorTemplate name (default "default-template")
-      --worker-image string           digest-pinned worker image for the worker pool, e.g. ateworker-gvisor built from the Substrate repo
-      --workerpool string             WorkerPool name (defaults to <template>-workerpool)
+      --api-allowed-hosts strings            extra host names that HTTP clients may use to reach ate-env-api, e.g. an internal load balancer name (a leading *. allows the names below it); the Service's in-cluster names, in the cluster's own DNS domain, IP addresses and localhost are always allowed
+      --api-image string                     digest-pinned ate-env-api image for the API service (required: this ate-env was built from source; release binaries default to the image published with the release, see docs/release.md)
+      --api-port int32                       port the ate-env-api service listens on (default 7777)
+      --api-replicas int32                   number of API service replicas (default 1)
+      --api-router-tls                       mount the pod identity certificate and the servicedns trust bundle into ate-env-api and dial the atenet router's TLS listeners, the only ones Substrate serves since v0.6.0; the API's SPIFFE ID must then be in the router's --ingress-allowed-spiffe-ids. Off, the API dials the plaintext addresses, which only the test fakes serve (default true)
+      --ateom-image string                   alias for --worker-image, kept from before Substrate renamed ateom to ateworker
+      --auth-token-secret string             Kubernetes Secret (key 'token') mounted into ate-env-api; its value is the bearer token ate-env-api requires from callers. Create it with 'ate-env manifest auth-secret' (default "ate-env-api-token")
+      --enable-tracing                       run ate-env-api with --enable-tracing, exporting OpenTelemetry traces over OTLP/gRPC
+  -h, --help                                 help for manifest
+      --insecure-no-auth                     deploy ate-env-api without a caller token: anyone who can reach its Service can create environments, run commands in them and reach their ports
+      --list-environments-atespaces string   comma-separated atespaces whose environments ate-env-api's ListEnvironments returns, or * for any (defaults to ate-env)
+      --metrics-port int32                   port ate-env-api serves Prometheus metrics on (--metrics-listen-addr), exposed on the container and the Service as "metrics" with prometheus.io scrape annotations; 0 leaves metrics off. The metrics listener has no authentication and no Host check
+      --namespace string                     Kubernetes namespace to deploy into (default "ate-env")
+      --otlp-endpoint string                 OTLP/gRPC collector endpoint for ate-env-api's traces, set as OTEL_EXPORTER_OTLP_ENDPOINT, e.g. http://otel-collector.observability:4317
+      --otlp-insecure                        set OTEL_EXPORTER_OTLP_INSECURE=true: talk to the collector in plaintext
+      --port-proxy-atespaces string          comma-separated atespaces whose environments ate-env-api's port proxy forwards to, or * for any (defaults to ate-env)
+      --replicas int32                       number of pre-warmed worker pods (default 5)
+      --template string                      ActorTemplate name (default "default-template")
+      --worker-image string                  digest-pinned worker image for the worker pool, e.g. ateworker-gvisor built from the Substrate repo
+      --workerpool string                    WorkerPool name (defaults to <template>-workerpool)
 
 Use "ate-env manifest [command] --help" for more information about a command.
 ```
@@ -792,7 +793,7 @@ Manages the lifecycle of isolated execution environments (defined in [`proto/ate
 | --- | ----------- |
 | `CreateEnvironment` | Creates and starts a new environment actor from an ActorTemplate, or from a digest-pinned `rootfs_image` on top of one: the template becomes the base, the image the container, and the guest is mounted in as a read-only image volume |
 | `GetEnvironment` | Retrieves environment details and status, the node it is on, its worker selector and its create time |
-| `ListEnvironments` | Returns the environments of one atespace, one page per call: `page_size` (default 100; the server asks Substrate for at most 1000) and `page_token`, which is Substrate's token. An optional `statuses` filter applies to each page after the read, thus a page can be shorter than `page_size`, or empty, while `next_page_token` is set |
+| `ListEnvironments` | Returns the environments of one atespace, one page per call: `page_size` (default 100; the server asks Substrate for at most 1000) and `page_token`, which is Substrate's token. An optional `statuses` filter applies to each page after the read, thus a page can be shorter than `page_size`, or empty, while `next_page_token` is set. `ate-env-api` reads only the atespaces that `--list-environments-atespaces` names (default `ate-env`; `*` means any; an empty value is an error) and answers `PermissionDenied` for another. A request that names no atespace targets `ate-env`, thus list it to serve such requests |
 | `GetImageStatus` | Reports the ActorTemplate derived for a digest-pinned `rootfs_image` (whether it exists) and the state of its golden snapshot: `NONE` (no template), `PENDING` (baking; environments boot from the image), `READY` (with the golden tag), `FAILED` (with the reason). Reads only. `ate-env image-status <image>` |
 | `EnsureImageTemplate` | Creates the derived ActorTemplate when it is missing, which starts the golden bake, and reports it like `GetImageStatus`; no environment is created, and a template whose bake failed is recreated the way a create would. `ate-env image-status <image> --ensure`. Advertised as feature `image_status` |
 | `ListPlacementDomains` | Reports the worker pools a per-environment worker selector can address: the labels all their schedulable workers carry (the selector), their distinct nodes, workers and slots per node, read from Substrate's workers; with a `template`, only the pools that template's own worker selector matches (`ate-env placement-domains --template`); needs the global viewer role (`ate-env manifest access-policy --global`) |

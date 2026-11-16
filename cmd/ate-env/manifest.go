@@ -139,6 +139,10 @@ type manifestConfig struct {
 	authTokenSecret    string
 	insecureNoAuth     bool
 	portProxyAtespaces string
+	// listAtespaces are the atespaces ListEnvironments reads
+	// (ate-env-api's -list-environments-atespaces); empty leaves the
+	// server default.
+	listAtespaces string
 	// allowedHosts are host names, next to the Service's in-cluster names,
 	// that HTTP callers may send to ate-env-api (its -allowed-hosts).
 	allowedHosts []string
@@ -534,6 +538,7 @@ the "template" subcommand: ate-env manifest template`,
 	cmd.Flags().Int32Var(&mCfg.apiPort, "api-port", 7777, "port the ate-env-api service listens on")
 	cmd.Flags().StringVar(&mCfg.authTokenSecret, "auth-token-secret", defaultAuthTokenSecret, "Kubernetes Secret (key 'token') mounted into ate-env-api; its value is the bearer token ate-env-api requires from callers. Create it with 'ate-env manifest auth-secret'")
 	cmd.Flags().BoolVar(&mCfg.insecureNoAuth, "insecure-no-auth", false, "deploy ate-env-api without a caller token: anyone who can reach its Service can create environments, run commands in them and reach their ports")
+	cmd.Flags().StringVar(&mCfg.listAtespaces, "list-environments-atespaces", "", "comma-separated atespaces whose environments ate-env-api's ListEnvironments returns, or * for any (defaults to ate-env)")
 	cmd.Flags().StringVar(&mCfg.portProxyAtespaces, "port-proxy-atespaces", "", "comma-separated atespaces whose environments ate-env-api's port proxy forwards to, or * for any (defaults to ate-env)")
 	cmd.Flags().StringSliceVar(&mCfg.allowedHosts, "api-allowed-hosts", nil, "extra host names that HTTP clients may use to reach ate-env-api, e.g. an internal load balancer name (a leading *. allows the names below it); the Service's in-cluster names, in the cluster's own DNS domain, IP addresses and localhost are always allowed")
 	cmd.Flags().BoolVar(&mCfg.routerTLS, "api-router-tls", true, "mount the pod identity certificate and the servicedns trust bundle into ate-env-api and dial the atenet router's TLS listeners, the only ones Substrate serves since v0.6.0; the API's SPIFFE ID must then be in the router's --ingress-allowed-spiffe-ids. Off, the API dials the plaintext addresses, which only the test fakes serve")
@@ -1137,6 +1142,9 @@ func buildAPIDeployment(cfg manifestConfig) *appsv1.Deployment {
 	}
 	if a := strings.TrimSpace(cfg.portProxyAtespaces); a != "" {
 		args = append(args, "-port-proxy-atespaces="+a)
+	}
+	if a := strings.TrimSpace(cfg.listAtespaces); a != "" {
+		args = append(args, "-list-environments-atespaces="+a)
 	}
 	ports := []corev1.ContainerPort{{ContainerPort: cfg.apiPort}}
 	var podAnnotations map[string]string

@@ -117,6 +117,46 @@ func TestListEnvironmentsReturnsOneAtespace(t *testing.T) {
 	}
 }
 
+// TestListEnvironmentsAtespaceScope checks AE-11: with ListEnvironmentsAtespaces set, a
+// request for an atespace outside it is PermissionDenied and no list call
+// reaches Substrate. The default atespace is not implied. An atespace in the
+// set lists as before.
+func TestListEnvironmentsAtespaceScope(t *testing.T) {
+	te := newFullTestEnv(t)
+	te.srv.ListEnvironmentsAtespaces = []string{"team-a"}
+	ctx := context.Background()
+
+	want := seedActors(t, te.control, "team-a", "a", 2)
+	seedActors(t, te.control, "team-b", "b", 3)
+	seedActors(t, te.control, apiservice.DefaultAtespace, "d", 1)
+
+	calls := te.control.ListCalls()
+	for _, req := range []*ateenvv1alpha.ListEnvironmentsRequest{
+		{Atespace: "team-b"},
+		{},
+		{Atespace: apiservice.DefaultAtespace},
+		// The atespace is checked first: an invalid page_size does not
+		// change the answer.
+		{Atespace: "team-b", PageSize: -1},
+	} {
+		resp, err := te.envClient.ListEnvironments(ctx, req)
+		if status.Code(err) != codes.PermissionDenied {
+			t.Errorf("ListEnvironments(%v) = %v, %v; want PermissionDenied", req, envIDs(resp.GetEnvironments()), err)
+		}
+	}
+	if got := te.control.ListCalls() - calls; got != 0 {
+		t.Errorf("the refused requests made %d list calls to Substrate, want none", got)
+	}
+
+	resp, err := te.envClient.ListEnvironments(ctx, &ateenvv1alpha.ListEnvironmentsRequest{Atespace: "team-a"})
+	if err != nil {
+		t.Fatalf("ListEnvironments(team-a): %v", err)
+	}
+	if got := envIDs(resp.GetEnvironments()); !slices.Equal(got, want) {
+		t.Errorf("ListEnvironments(team-a) = %v, want %v", got, want)
+	}
+}
+
 // TestListEnvironmentsPageSize checks AE-7: page_size 0 reads the default, a
 // value above the cap reads the cap and is not refused, and a negative value
 // is InvalidArgument.

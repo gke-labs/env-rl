@@ -1024,6 +1024,13 @@ func TestManifestRequiresTheCallerTokenByDefault(t *testing.T) {
 	if err != nil || !strings.Contains(out, "secretName: team-token") || !strings.Contains(out, "-port-proxy-atespaces=ate-env,team-a") {
 		t.Errorf("--auth-token-secret=team-token --port-proxy-atespaces: err %v, output:\n%s", err, out)
 	}
+	if strings.Contains(out, "-list-environments-atespaces") {
+		t.Errorf("a manifest without --list-environments-atespaces sets the server flag:\n%s", out)
+	}
+	out, err = runManifest(t, "--list-environments-atespaces=ate-env,team-a")
+	if err != nil || !strings.Contains(out, "-list-environments-atespaces=ate-env,team-a") {
+		t.Errorf("--list-environments-atespaces: err %v, output:\n%s", err, out)
+	}
 }
 
 func TestManifestInsecureNoAuth(t *testing.T) {

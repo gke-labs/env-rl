@@ -22,6 +22,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -87,6 +88,13 @@ type Server struct {
 	WakeStateReadCap time.Duration
 	// Info is the build and configuration GetServerInfo reports.
 	Info ServerInfo
+	// ListEnvironmentsAtespaces, when set, are the only atespaces
+	// ListEnvironments reads; a request for another is PermissionDenied,
+	// before any other check and any read of the control plane. Empty means
+	// any atespace the access policy lets ate-env-api read. DefaultAtespace
+	// is not implied: list it to serve requests that name no atespace. The
+	// -list-environments-atespaces flag sets it.
+	ListEnvironmentsAtespaces []string
 	// RouterTLS, when set, is the client TLS configuration for the router's
 	// listeners (see internal/routertls); nil dials them in plaintext.
 	RouterTLS *tls.Config
@@ -450,9 +458,17 @@ const (
 // set.
 //
 // Errors: InvalidArgument for a negative page_size, a status outside
-// EnvironmentStatus, or a page_token Substrate refuses. Other control plane
-// failures are mapped by toGRPCError.
+// EnvironmentStatus, or a page_token Substrate refuses. PermissionDenied for
+// an atespace outside ListEnvironmentsAtespaces. Other control plane failures are mapped
+// by toGRPCError.
 func (s *Server) ListEnvironments(ctx context.Context, req *ateenvv1alpha.ListEnvironmentsRequest) (*ateenvv1alpha.ListEnvironmentsResponse, error) {
+	atespace := req.GetAtespace()
+	if atespace == "" {
+		atespace = DefaultAtespace
+	}
+	if len(s.ListEnvironmentsAtespaces) > 0 && !slices.Contains(s.ListEnvironmentsAtespaces, atespace) {
+		return nil, status.Errorf(codes.PermissionDenied, "ListEnvironments does not read atespace %q; -list-environments-atespaces names the atespaces it reads", atespace)
+	}
 	size := req.GetPageSize()
 	switch {
 	case size < 0:
@@ -468,10 +484,6 @@ func (s *Server) ListEnvironments(ctx context.Context, req *ateenvv1alpha.ListEn
 			return nil, status.Errorf(codes.InvalidArgument, "status %d is not an EnvironmentStatus", st)
 		}
 		keep[st] = true
-	}
-	atespace := req.GetAtespace()
-	if atespace == "" {
-		atespace = DefaultAtespace
 	}
 
 	actors, next, err := s.client.ListPage(ctx, atespace, size, req.GetPageToken())

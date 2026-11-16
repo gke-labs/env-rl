@@ -37,6 +37,10 @@ user needs to know across them.
   `next_page_token` is set: follow the token until it is empty. Go client:
   `Client.List`. Python client: `Client.list_environments()`, which returns
   an `EnvironmentPage`. Labels and a label filter are not part of it (#387).
+  The server reads only the atespaces that `--list-environments-atespaces`
+  names (default `ate-env`; `*` means any) and answers `PermissionDenied`
+  for another atespace. `ate-env manifest --list-environments-atespaces`
+  sets the flag on the Deployment (#403).
 - `Environment.create_time`: when Substrate created the environment's actor,
   on `CreateEnvironment`, `GetEnvironment` and `ListEnvironments`. Python:
   `EnvironmentInfo.create_time`, a UTC `datetime`, or `None` from a server

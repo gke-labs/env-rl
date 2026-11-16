@@ -396,7 +396,9 @@ class Client:
         while ``next_page_token`` is set: follow the token until it is "".
         ``EnvironmentStatus.UNSPECIFIED`` is a status like the others, not
         "all": it keeps only the environments whose state the server cannot
-        name.
+        name. The server lists only the atespaces that its
+        ``--list-environments-atespaces`` flag names (the default atespace
+        alone, by default) and refuses another (``PermissionDeniedError``).
         """
         req = env_pb2.ListEnvironmentsRequest(
             atespace=atespace,

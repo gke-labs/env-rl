@@ -173,7 +173,9 @@ print((await env.info()).template.name)   # default-template-<12 hex of the dige
 
 To list the environments of an atespace, read pages until the token is empty.
 `statuses` filters each page on the server after it reads it, thus a page can
-be short, or empty, while `next_page_token` is set:
+be short, or empty, while `next_page_token` is set. The server lists only the
+atespaces that its `--list-environments-atespaces` flag names (default
+`ate-env`) and raises `PermissionDeniedError` for another:
 
 ```python
 token = ""

@@ -67,17 +67,24 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// portProxyAtespaces parses -port-proxy-atespaces; "*" allows any atespace and empty is an error.
-func portProxyAtespaces(v string) ([]string, error) {
+// listEnvironmentsAtespacesDefault is the default of
+// -list-environments-atespaces: the default atespace alone, thus a server
+// started without the flag lists no other atespace.
+const listEnvironmentsAtespacesDefault = ate.DefaultAtespace
+
+// atespacesFlag parses the value of the flag name, a list of atespaces
+// (-port-proxy-atespaces, -list-environments-atespaces); "*" allows any
+// atespace and empty is an error.
+func atespacesFlag(name, v string) ([]string, error) {
 	if strings.TrimSpace(v) == "*" {
 		return nil, nil
 	}
 	out := splitCSV(v)
 	if len(out) == 0 {
-		return nil, errors.New("-port-proxy-atespaces is empty; name the atespaces, or * for any")
+		return nil, fmt.Errorf("-%s is empty; name the atespaces, or * for any", name)
 	}
 	if slices.Contains(out, "*") {
-		return nil, errors.New("-port-proxy-atespaces cannot combine * with other names")
+		return nil, fmt.Errorf("-%s cannot combine * with other names", name)
 	}
 	return out, nil
 }
@@ -122,6 +129,7 @@ func main() {
 		atenet            = flag.String("atenet", ate.DefaultRouterAddr, "address of the atenet router for the guest's gRPC: its HTTPS listener (443) with -atenet-client-cert, else the plaintext one, which only the test fakes serve")
 		atenetConn        = flag.String("atenet-connect", ate.DefaultRouterConnectAddr, "address of the atenet router's CONNECT listener: the TLS one (8444) with -atenet-client-cert, else the plaintext one, which only the test fakes serve; HTTP requests carrying X-Env-Id and X-Env-Port, or to /v1alpha/envs/{id}/ports/{port}/..., are forwarded through it to that port in the environment. Without -auth-token-file the forwarding does not authenticate callers, and it reaches any port of any actor in the atespaces -port-proxy-atespaces names. Empty disables it")
 		ppAtespaces       = flag.String("port-proxy-atespaces", ate.DefaultAtespace, "comma-separated atespaces whose environments the port proxy forwards to, or * for any")
+		listAtespaces     = flag.String("list-environments-atespaces", listEnvironmentsAtespacesDefault, "comma-separated atespaces whose environments ListEnvironments returns, or * for any; a request for another atespace gets PermissionDenied")
 		ppOrigins         = flag.String("port-proxy-trusted-origins", "", "comma-separated browser origins (scheme://host[:port]) whose pages may use the port proxy's path form, next to the listener's own origin")
 		ppHeaderTimeout   = flag.Duration("port-proxy-response-header-timeout", 0, "how long the port proxy waits for a daemon's response headers; 0 means no limit, and the caller's deadline applies")
 		ppWakeWaitCap     = flag.Duration("port-proxy-wake-wait-cap", portproxy.DefaultWakeWaitCap, "the longest the port proxy holds a request that asks for it with the X-Env-Wake-Wait header (whole seconds) while a suspended environment wakes, before it forwards the request; a larger value in the header is cut to this, and a wake that lasts longer gets 503 with Retry-After as without the header. 0 or less turns the hold off; the header is then still validated and not forwarded")
@@ -164,6 +172,10 @@ func main() {
 	hosts, err := hostcheck.New(append(serviceHosts, hostcheck.ParseList(*allowedHosts)...))
 	if err != nil {
 		log.Fatalf("--allowed-hosts: %v", err)
+	}
+	listScope, err := atespacesFlag("list-environments-atespaces", *listAtespaces)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	var callerAuth *apiservice.BearerAuth
@@ -250,6 +262,7 @@ func main() {
 	apisvc.WakeNoCapacityGrace = *wakeNoCapGrace
 	apisvc.WakeStateReadCap = *wakeStateReadCap
 	apisvc.WarmMaxProbesPerNode = *warmMaxProbes
+	apisvc.ListEnvironmentsAtespaces = listScope
 	apisvc.Info = apiservice.ServerInfo{
 		Version:   buildVersion(),
 		PortProxy: *atenetConn != "",
@@ -299,7 +312,7 @@ func main() {
 	var handler http.Handler = mux
 	if *atenetConn != "" {
 		origins := splitCSV(*ppOrigins)
-		atespaces, err := portProxyAtespaces(*ppAtespaces)
+		atespaces, err := atespacesFlag("port-proxy-atespaces", *ppAtespaces)
 		if err != nil {
 			log.Fatalf("port proxy: %v", err)
 		}

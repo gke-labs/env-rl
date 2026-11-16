@@ -20,6 +20,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/agent-substrate/env/internal/apiservice"
@@ -35,22 +36,30 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
-func TestPortProxyAtespaces(t *testing.T) {
+// TestAtespacesFlag checks the parse that -port-proxy-atespaces and
+// -list-environments-atespaces share.
+func TestAtespacesFlag(t *testing.T) {
 	for in, want := range map[string][]string{
 		"ate-env":            {"ate-env"},
 		" ate-env , team-a ": {"ate-env", "team-a"},
 		"*":                  nil,
 		" * ":                nil,
 	} {
-		if got, err := portProxyAtespaces(in); err != nil || !reflect.DeepEqual(got, want) {
-			t.Errorf("portProxyAtespaces(%q) = %q, %v; want %q", in, got, err, want)
+		if got, err := atespacesFlag("port-proxy-atespaces", in); err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("atespacesFlag(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
 	// An empty value must not mean "any atespace", and "*" cannot be combined with names.
+	// The error names the flag.
 	for _, in := range []string{"", " ", ",", " , ", "ate-env,*", "*,ate-env"} {
-		if got, err := portProxyAtespaces(in); err == nil {
-			t.Errorf("portProxyAtespaces(%q) = %q, want an error", in, got)
+		got, err := atespacesFlag("list-environments-atespaces", in)
+		if err == nil || !strings.Contains(err.Error(), "-list-environments-atespaces") {
+			t.Errorf("atespacesFlag(%q) = %q, %v; want an error that names the flag", in, got, err)
 		}
+	}
+	// AE-11: without the flag, ListEnvironments reads the default atespace alone.
+	if got, err := atespacesFlag("list-environments-atespaces", listEnvironmentsAtespacesDefault); err != nil || !reflect.DeepEqual(got, []string{ate.DefaultAtespace}) {
+		t.Errorf("the default of -list-environments-atespaces parses to %q, %v; want the default atespace alone", got, err)
 	}
 }
 

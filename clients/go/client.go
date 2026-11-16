@@ -305,7 +305,9 @@ func (c *Client) get(ctx context.Context, cn *conn, atespace, id string) (_ *ate
 // or none, while the token is set: follow the token until it is empty.
 // ENVIRONMENT_STATUS_UNSPECIFIED in req.Statuses is a status like the others,
 // not "all": it keeps only the environments whose state the server cannot
-// name.
+// name. The server lists only the atespaces its -list-environments-atespaces
+// flag names (the default atespace alone, by default) and answers
+// ErrPermissionDenied for another.
 func (c *Client) List(ctx context.Context, req *ateenvv1alpha.ListEnvironmentsRequest) (_ *ateenvv1alpha.ListEnvironmentsResponse, err error) {
 	if req == nil {
 		req = &ateenvv1alpha.ListEnvironmentsRequest{}

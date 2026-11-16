@@ -177,7 +177,7 @@ The `editor` role of the access policy already allows that call, thus the RPC ad
 
 | Threat | Current mitigation | Gap |
 |---|---|---|
-| A caller enumerates the environments of other callers | The token (Boundary 1). The list reads one atespace for each call, with the access that the policy gives `ate-env-api`: the `editor` role on the atespaces an operator adds. | The RPC has no list of allowed atespaces. With the global viewer binding (`ate-env manifest access-policy --global`, which `ListPlacementDomains` needs), `ate-env-api` can list the actors of each atespace of the control plane, also ones that ate-env did not create, thus a token holder can too. Each token holder reads the id, template, status, node and create time of every environment in every atespace that `ate-env-api` can read. Before, a caller had to know an id to read these with `GetEnvironment`. With an id, a token holder can already run commands in that environment (Boundary 1, one shared token). Tracked in #403; no mitigation is decided. |
+| A caller enumerates the environments of other callers | The token (Boundary 1). The list reads one atespace for each call, and only an atespace that `--list-environments-atespaces` names (default `ate-env`). A request for another atespace gets `PermissionDenied` before any read of the control plane (#403). | Inside the atespaces that the flag names, each token holder reads the id, template, status, node and create time of every environment, also of actors that ate-env did not create. Before, a caller had to know an id to read these with `GetEnvironment`. With an id, a token holder can already run commands in that environment (Boundary 1, one shared token). With `--list-environments-atespaces='*'` and the global viewer binding (`ate-env manifest access-policy --global`, which `ListPlacementDomains` needs), the list reaches each atespace of the control plane. |
 | Large responses | One call asks Substrate for at most 1000 actors (`MaxListPageSize`), 100 by default, and holds one page in memory. Substrate can return a few more than the page size. | No rate limit, as for the other RPCs. |
 
 ## Client tracing
@@ -260,7 +260,8 @@ sets it.
 1. Caller authentication uses one shared token, and the listener has no TLS. A deployment that
    is not made with `ate-env manifest` has no authentication unless it sets `-auth-token-file`.
 2. Guest calls and MCP reach any actor that the router serves; the access policy does not limit
-   them. The port proxy reaches the atespaces that `--port-proxy-atespaces` names.
+   them. The port proxy reaches the atespaces that `--port-proxy-atespaces` names, and
+   `ListEnvironments` reads the atespaces that `--list-environments-atespaces` names.
 3. HTTP `Host` validation (`internal/hostcheck`) blocks browser DNS rebinding across `/healthz`,
    MCP, and the port proxy, but the gRPC handler on `/` stays unwrapped and non-browser clients can
    set `Host` arbitrarily (relying on `-auth-token-file`). Between the `atenet` router and the
