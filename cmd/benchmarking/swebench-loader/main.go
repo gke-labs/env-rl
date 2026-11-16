@@ -962,6 +962,7 @@ func runCmd(args []string) (retErr error) {
 		width            = fs.Int("width", 50, "Most tasks in flight at once.")
 		arrivalRate      = fs.Float64("arrival-rate", 0, "open-loop: Poisson task arrival rate in tasks/sec.")
 		tasksPerImage    = fs.Int("tasks-per-image", 1, "eval: replays per image.")
+		taskOrder        = fs.String("task-order", "image", "eval: the order of the (image, replay) pairs. image runs an image's replays back to back (with -placement and no -domain-width they all land on one node at once); round runs replay k of every image before replay k+1, which spreads one image's creates over the run (not with -strategy). With -domain-width the order applies in each domain's queue.")
 		domainWidth      = fs.Int("domain-width", 0, "eval with -placement: run this many tasks at once in each placement domain, a closed loop per domain, instead of -width across the run; replay k of an image goes to the k-th of its domains. 0 disables.")
 		rollouts         = fs.Int("rollouts", 2, "steps: environments per image.")
 		steps            = fs.Int("steps", 8, "steps: training steps.")
@@ -978,8 +979,8 @@ func runCmd(args []string) (retErr error) {
 		preflightFlag    = fs.Bool("preflight", false, "With -placement: run the pre-flight (the preflight subcommand, with its defaults) over the plan before the run, writing preflight-events.jsonl and preflight-coverage.json next to the run's events (-events-dir, or the directory of -out; the directory above, when that one is named events). An incomplete pre-flight is logged and the run goes on, as is a complete one that left probes it could not delete; a cancelled one ends the command; report -preflight-coverage reads the file for Validity Rule 1.")
 		createTimeout    = fs.Duration("create-timeout", 5*time.Minute, "Deadline for one create call.")
 		stepTimeout      = fs.Duration("step-timeout", 10*time.Minute, "Default deadline for a run step without its own timeout.")
-		wakeBudget       = fs.Duration("wake-budget", 3*time.Minute, "How long a task's first command is retried while the environment is still waking or its image is still being baked.")
-		wakeBackoff      = fs.Duration("wake-backoff", swebench.DefaultWakeBackoff, "Initial pause between wake retries; doubles up to five times this.")
+		wakeBudget       = fs.Duration("wake-budget", 3*time.Minute, "How long a task's first command is retried while the environment is still waking or its image is still being baked, and how long the step loop's park retries a suspend that fails with a transient error.")
+		wakeBackoff      = fs.Duration("wake-backoff", swebench.DefaultWakeBackoff, "Initial pause between wake retries, and between suspend retries; doubles up to five times this.")
 		deleteRate       = fs.Float64("delete-rate", swebench.DefaultDeleteRate, "Most environment deletes per second per loader process, through ate-env-api; the bucket rate-limits snapshot deletes, and a delete it refuses is retried with backoff for up to two minutes. 0 removes the cap. Recorded as the delete_rate label.")
 		runID            = fs.String("run-id", "", "Run id, prefix of every environment name: lowercase letters, digits and '-', at most 20 characters; default swe-<unix time>.")
 		out              = fs.String("out", "", "JSONL events file; default <run-id>.jsonl in the working directory.")
@@ -1180,7 +1181,7 @@ func runCmd(args []string) (retErr error) {
 		environments = *imagesPerStep * fanout // per step
 	}
 	log.Info("plan", slog.String("run", *runID), slog.String("mode", *mode),
-		slog.String("strategy", *strategy), slog.Int("window_size", *windowSize),
+		slog.String("strategy", *strategy), slog.Int("window_size", *windowSize), slog.String("task_order", *taskOrder),
 		slog.Int("images", len(selected)),
 		slog.Int("images_per_step", *imagesPerStep),
 		slog.Int("environments", environments), slog.Int("width", *width), slog.Int("steps", *steps),
@@ -1199,6 +1200,7 @@ func runCmd(args []string) (retErr error) {
 		Width:         *width,
 		ArrivalRate:   *arrivalRate,
 		TasksPerImage: *tasksPerImage,
+		TaskOrder:     *taskOrder,
 		DomainWidth:   *domainWidth,
 		Rollouts:      *rollouts,
 		Steps:         *steps,

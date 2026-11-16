@@ -1,7 +1,8 @@
 # Plan: client-only fleet gaps (#123)
 
-Status: proposal, 2026-11-14, checked against `main` at `456353fd`. Nothing here is built. The
-criteria are in [acceptance-criteria.md](./acceptance-criteria.md), group `FL`.
+Status: proposal, 2026-11-14, checked against `main` at `456353fd`. Row 10 (FL-1 to FL-4) is built
+by #397; the rest is open. The criteria are in [acceptance-criteria.md](./acceptance-criteria.md),
+group `FL`.
 
 ## 1. Scope
 

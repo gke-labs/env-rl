@@ -305,6 +305,10 @@ func (ft *faultTracker) Add(e Event) {
 					b := ft.ensureBucket(schema.FaultTierDuringEpisode, schema.FaultCatWakeResumeFailure)
 					b.recovered++
 					ft.recordExample(b, fmt.Sprintf("wake succeeded after %d attempts", e.Attempts))
+				case EventSuspend:
+					b := ft.ensureBucket(schema.FaultTierDuringEpisode, schema.FaultCatSnapshotRestoreFailure)
+					b.recovered++
+					ft.recordExample(b, fmt.Sprintf("suspend succeeded after %d attempts", e.Attempts))
 				}
 			}
 			return
@@ -346,6 +350,10 @@ func (ft *faultTracker) Add(e Event) {
 				b := ft.ensureBucket(schema.FaultTierDuringEpisode, schema.FaultCatWakeResumeFailure)
 				b.recovered++
 				ft.recordExample(b, fmt.Sprintf("wake succeeded after %d attempts", e.Attempts))
+			case EventSuspend:
+				b := ft.ensureBucket(schema.FaultTierDuringEpisode, schema.FaultCatSnapshotRestoreFailure)
+				b.recovered++
+				ft.recordExample(b, fmt.Sprintf("suspend succeeded after %d attempts", e.Attempts))
 			}
 		}
 		if marksEpisodeActive(e) {

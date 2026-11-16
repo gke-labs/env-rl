@@ -49,11 +49,39 @@ from .types import (
     DataPlaneEndpoint,
     FleetPlan,
     PlanEntry,
+    PreflightCheck,
+    PreflightReport,
     RawSandboxInstance,
     Task,
 )
 
 logger = logging.getLogger("ate_env_rl.fleet")
+
+
+def _connectivity_check(probe: Callable[[], Any]) -> PreflightCheck:
+    """Run a backend's preflight as the report's ``connectivity`` check."""
+    try:
+        probe()
+    except Exception as e:  # noqa: BLE001 - reported; strict=True raises
+        return PreflightCheck("connectivity", "failed", f"{type(e).__name__}: {e}")
+    return PreflightCheck("connectivity", "ok")
+
+
+def _skipped_checks(images: Sequence[str], why: str) -> list[PreflightCheck]:
+    return [
+        *(PreflightCheck(f"image:{image}", "skipped", why) for image in images),
+        PreflightCheck("placement", "skipped", why),
+    ]
+
+
+def _report(checks: list[PreflightCheck], strict: bool) -> PreflightReport:
+    """The report of ``checks``; with ``strict``, PreflightError on a failure (FL-2)."""
+    report = PreflightReport(tuple(checks))
+    if strict and report.failed:
+        raise PreflightError(
+            "preflight failed: " + "; ".join(f"{c.name}: {c.detail}" for c in report.failed)
+        )
+    return report
 
 
 class SandboxFleet:
@@ -305,6 +333,32 @@ class SandboxFleet:
         """Run backend connectivity, permissions, and capacity checks."""
         with self._obs.phase("preflight", backend=self.backend_label):
             self.backend.preflight()
+
+    def preflight_report(self, strict: bool = False) -> PreflightReport:
+        """Check the backend and return a PreflightReport (FL-1, FL-2).
+
+        The ``connectivity`` check is the backend's own preflight (for
+        Substrate: ate-env-api answers, accepts the token and answers a get
+        in the atespace). When it passes and the backend offers them, the
+        checks of each loaded image's derived template and golden, and of
+        the placement domains, follow. A failed check is reported, not
+        raised; ``strict=True`` raises PreflightError naming the failed
+        checks. ``preflight()``, which ``setup()`` and ``run()`` call, stays
+        the connectivity check alone and raises as before.
+
+        The observer records the call as the phase ``preflight_report``,
+        apart from ``preflight()``'s ``preflight``: ``error`` when
+        ``strict=True`` raises, else ``ok`` (the report carries the failed
+        checks).
+        """
+        images = self._preflight_image_list()
+        with self._obs.phase("preflight_report", backend=self.backend_label):
+            checks = [_connectivity_check(self.backend.preflight)]
+            if checks[0].status == "ok" and hasattr(self.backend, "preflight_checks"):
+                checks += self.backend.preflight_checks(images)
+            elif checks[0].status != "ok":
+                checks += _skipped_checks(images, "the connectivity check failed")
+            return _report(checks, strict)
 
     def plan(self) -> FleetPlan:
         """Compute provisioning sizing for all tasks."""

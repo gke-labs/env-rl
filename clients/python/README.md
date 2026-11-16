@@ -579,6 +579,24 @@ routed through `image_templates` or `Task.template` sends no image, thus only
 `node_selector` applies to it. `client.get(id).node` reports the node an
 environment landed on.
 
+`fleet.preflight_report()` checks the setup without warming anything and
+returns a `PreflightReport`: a `connectivity` check (ate-env-api answers,
+accepts the token, and answers in the atespace), one `image:<image>` check per
+loaded image whose creates derive a template (its golden snapshot's state;
+failed when the bake failed, or when neither the base template nor the derived
+template exists), and a `placement` check (failed when, for the worker selector
+of some loaded image's creates, no pool of the base template with nodes
+matches: the base template's pools, narrowed by `node_selector` and the image's
+`placement` labels, as for the image pre-flight below; ate-env-api needs the
+global viewer binding to list them). The placement check reads only the base
+template's pools: an image routed through `image_templates` adds no selector,
+and no check reads the pools of the templates it routes to. A check whose RPC the server does not serve is `skipped`. A failed check
+is reported, not raised: `report.ok`, `report.failed`, and `report.check(name)`
+read it, and `preflight_report(strict=True)` raises `PreflightError` naming the
+failed checks. `preflight()`, which `setup()` and `run()` call, stays the
+connectivity check alone and raises on failure. The observer records the call
+as the phase `preflight_report`.
+
 `FleetConfig(preflight=True)` warms those pools before the run: `run()` puts
 every loaded task's digest-pinned image on every node of the pools its creates
 can land on (the base template's pools, narrowed by `node_selector` and the

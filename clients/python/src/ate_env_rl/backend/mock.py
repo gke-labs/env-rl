@@ -17,12 +17,13 @@ from __future__ import annotations
 import collections
 import time
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from ..errors import SandboxStartError
 from ..telemetry import metrics
 from ..telemetry.trace_recorder import current_slot_wait_s, is_measure_mode
-from ..types import EnvironmentSpec, RawSandboxInstance
+from ..types import EnvironmentSpec, PreflightCheck, RawSandboxInstance
 from .base import BackendDriver
 
 
@@ -38,6 +39,11 @@ class MockBackendDriver(BackendDriver):
         self.warm_pools: dict[str | tuple[str, str | None], int] = collections.defaultdict(int)
         self.instances: dict[str, RawSandboxInstance] = {}
         self.reaped_runs: set[str] = set()
+
+    def preflight_checks(self, images: Sequence[str]) -> list[PreflightCheck]:
+        """The mock serves every image and has room: each check is ok."""
+        checks = [PreflightCheck(f"image:{image}", "ok", "mock") for image in images]
+        return [*checks, PreflightCheck("placement", "ok", "mock")]
 
     def preflight(self) -> None:
         if self.fail_preflight:

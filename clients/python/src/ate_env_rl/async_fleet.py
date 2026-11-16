@@ -29,7 +29,7 @@ from typing import Any
 
 from .config import FleetConfig
 from .errors import PreflightError
-from .fleet import SandboxFleet
+from .fleet import SandboxFleet, _report, _skipped_checks
 from .handle import SandboxHandle
 from .observability import Observer, RunReport, repo_family
 from .sources import FieldSpec, TaskSource
@@ -41,7 +41,7 @@ from .telemetry.trace_recorder import (
     register_env_meta,
     task_context,
 )
-from .types import FleetPlan, Task
+from .types import FleetPlan, PreflightCheck, PreflightReport, Task
 
 logger = logging.getLogger("sandbox_sdk.async_fleet")
 
@@ -142,6 +142,25 @@ class AsyncSandboxFleet:
                 await self.backend.preflight_async()
         else:
             await asyncio.to_thread(self._fleet.preflight)
+
+    async def preflight_report(self, strict: bool = False) -> PreflightReport:
+        """As SandboxFleet.preflight_report, on the event loop (FL-4)."""
+        if not hasattr(self.backend, "preflight_async"):
+            return await asyncio.to_thread(self._fleet.preflight_report, strict)
+        images = self._fleet._preflight_image_list()
+        with self.observer.phase("preflight_report", backend=self._backend_label):
+            try:
+                await self.backend.preflight_async()
+                checks = [PreflightCheck("connectivity", "ok")]
+            except Exception as e:  # noqa: BLE001 - reported; strict=True raises
+                checks = [PreflightCheck("connectivity", "failed", f"{type(e).__name__}: {e}")]
+            if checks[0].status != "ok":
+                checks += _skipped_checks(images, "the connectivity check failed")
+            elif hasattr(self.backend, "preflight_checks_async"):
+                checks += await self.backend.preflight_checks_async(images)
+            elif hasattr(self.backend, "preflight_checks"):
+                checks += await asyncio.to_thread(self.backend.preflight_checks, images)
+            return _report(checks, strict)
 
     async def plan(self) -> FleetPlan:
         return await asyncio.to_thread(self._fleet.plan)

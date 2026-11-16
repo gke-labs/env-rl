@@ -56,6 +56,14 @@ type fakeBackend struct {
 	failDelete  map[string]int // sandbox deletes still to refuse, by id
 	unavailable int32          // first-command Unavailable errors still to return
 
+	// failSuspend is the suspends still to refuse with suspendErr, by id;
+	// suspendCalls counts every suspend, refused or not, and suspendModes
+	// records each attempt's async flag in call order.
+	failSuspend  map[string]int
+	suspendErr   error
+	suspendCalls map[string]int
+	suspendModes map[string][]bool
+
 	inflight    atomic.Int32
 	maxInflight atomic.Int32
 	// awake counts environments created and not parked or deleted; maxAwake
@@ -78,7 +86,19 @@ func newFake() *fakeBackend {
 	return &fakeBackend{created: map[string]int{}, suspended: map[string]int{}, suspendedAsync: map[string]int{},
 		forked: map[string]string{}, deleted: map[string]int{},
 		deletedByID: map[string]int{}, files: map[string]string{}, failCreate: map[string]bool{},
-		failDelete: map[string]int{}}
+		failDelete: map[string]int{}, failSuspend: map[string]int{}, suspendCalls: map[string]int{},
+		suspendModes: map[string][]bool{}}
+}
+
+// refuseSuspend counts a suspend of id and returns suspendErr while
+// failSuspend has refusals left for it. The caller holds f.mu.
+func (f *fakeBackend) refuseSuspend(id string) error {
+	f.suspendCalls[id]++
+	if f.failSuspend[id] > 0 {
+		f.failSuspend[id]--
+		return f.suspendErr
+	}
+	return nil
 }
 
 func (f *fakeBackend) Delete(ctx context.Context, id string) error {
@@ -172,6 +192,10 @@ func (s *fakeSandbox) WriteFile(ctx context.Context, path string, content []byte
 func (s *fakeSandbox) Suspend(ctx context.Context) error {
 	s.b.mu.Lock()
 	defer s.b.mu.Unlock()
+	s.b.suspendModes[s.id] = append(s.b.suspendModes[s.id], false)
+	if err := s.b.refuseSuspend(s.id); err != nil {
+		return err
+	}
 	s.b.suspended[s.id]++
 	if s.parked.CompareAndSwap(false, true) {
 		s.b.bumpAwake(-1)
@@ -182,6 +206,10 @@ func (s *fakeSandbox) Suspend(ctx context.Context) error {
 func (s *fakeSandbox) SuspendWithMode(ctx context.Context, async bool) error {
 	s.b.mu.Lock()
 	defer s.b.mu.Unlock()
+	s.b.suspendModes[s.id] = append(s.b.suspendModes[s.id], async)
+	if err := s.b.refuseSuspend(s.id); err != nil {
+		return err
+	}
 	if async {
 		s.b.suspendedAsync[s.id]++
 	} else {
@@ -1135,6 +1163,23 @@ func TestLabelsAreDeclared(t *testing.T) {
 				t.Errorf("the loader records %s but LoaderLabelKeys lacks it, so report -arm would not compare it", k)
 			}
 		}
+	}
+	// Eval-only labels: task_order is recorded for round and must be a key
+	// report -arm compares; the default image order leaves no label.
+	eval = Config{Mode: ModeEval, Width: 3, Trajectory: &Trajectory{Name: "t"}, TasksPerImage: 2, TaskOrder: TaskOrderRound,
+		CreateTimeout: time.Minute, StepTimeout: time.Minute, WakeBudget: time.Minute, WakeBackoff: time.Second}
+	el := eval.labels()
+	if el["task_order"] != TaskOrderRound {
+		t.Fatalf("eval labels = %v, want task_order=round", el)
+	}
+	for k := range el {
+		if !slices.Contains(LoaderLabelKeys, k) {
+			t.Errorf("the loader records %s but LoaderLabelKeys lacks it, so report -arm would not compare it", k)
+		}
+	}
+	eval.TaskOrder = TaskOrderImage
+	if _, ok := eval.labels()["task_order"]; ok {
+		t.Errorf("task_order=image must leave no label, so reps from before the flag pool with new ones")
 	}
 }
 

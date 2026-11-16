@@ -69,6 +69,9 @@ type fakeAPI struct {
 	exitCode          int32
 	stdout, stderr    string
 
+	// suspendUnavailable is how many SuspendEnvironment calls answer
+	// Unavailable first.
+	suspendUnavailable int
 	// deleteRateLimited is how many DeleteEnvironment calls answer a 429
 	// first; deleteCalls counts every call.
 	deleteRateLimited int
@@ -455,8 +458,12 @@ func (f *fakeAPI) EnsureImageTemplate(_ context.Context, req *ateenvv1alpha.Ensu
 func (f *fakeAPI) SuspendEnvironment(_ context.Context, req *ateenvv1alpha.SuspendEnvironmentRequest) (*ateenvv1alpha.SuspendEnvironmentResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.suspended = append(f.suspended, req.GetId())
 	f.suspendModes = append(f.suspendModes, req.GetMode())
+	if f.suspendUnavailable > 0 {
+		f.suspendUnavailable--
+		return nil, status.Error(codes.Unavailable, "while calling atelet Checkpoint: handshake timed out")
+	}
+	f.suspended = append(f.suspended, req.GetId())
 	return &ateenvv1alpha.SuspendEnvironmentResponse{}, nil
 }
 

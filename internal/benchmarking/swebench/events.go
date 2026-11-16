@@ -97,7 +97,8 @@ type Event struct {
 	// Tail is the last bytes of a failed or reward step's output.
 	Tail string `json:"tail,omitempty"`
 	// Attempts is how many tries a ttfi or wake took; above 1 means the
-	// environment was not serving when first asked.
+	// environment was not serving when first asked. On a suspend of the step
+	// loop's park it is how many times the suspend was sent.
 	Attempts     int     `json:"attempts,omitempty"`
 	Snapshot     string  `json:"snapshot,omitempty"`
 	Node         string  `json:"node,omitempty"`

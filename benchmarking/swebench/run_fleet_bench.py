@@ -97,6 +97,7 @@ LOADER_LABEL_KEYS = frozenset({
     "images_per_step",
     "park_each",
     "placement",
+    "task_order",
     "domain_width",
 })
 

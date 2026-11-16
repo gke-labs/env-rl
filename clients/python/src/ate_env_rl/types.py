@@ -176,6 +176,44 @@ class GoldenSnapshotState(enum.IntEnum):
     FAILED = env_pb2.GOLDEN_SNAPSHOT_STATE_FAILED
 
 
+PreflightStatus = Literal["ok", "failed", "skipped"]
+
+
+@dataclass(frozen=True)
+class PreflightCheck:
+    """One check of ``preflight_report()`` (FL-1).
+
+    ``name`` is ``connectivity``, ``placement``, or ``image:<image>``.
+    ``status`` is ``ok``, ``failed``, or ``skipped`` (the server lacks the
+    RPC, or the connectivity check failed); ``detail`` says what was seen.
+    """
+
+    name: str
+    status: PreflightStatus
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class PreflightReport:
+    """What ``SandboxFleet.preflight_report()`` found (FL-1 to FL-4)."""
+
+    checks: tuple[PreflightCheck, ...] = ()
+
+    @property
+    def failed(self) -> tuple[PreflightCheck, ...]:
+        """The checks whose status is ``failed``."""
+        return tuple(c for c in self.checks if c.status == "failed")
+
+    @property
+    def ok(self) -> bool:
+        """True when no check failed (``skipped`` ones do not count)."""
+        return not self.failed
+
+    def check(self, name: str) -> PreflightCheck | None:
+        """The check called ``name``, or None."""
+        return next((c for c in self.checks if c.name == name), None)
+
+
 @dataclass(frozen=True)
 class ImageStatus:
     """The template derived for a rootfs image and its golden snapshot's state.

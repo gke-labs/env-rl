@@ -49,6 +49,14 @@ user needs to know across them.
 - CI: the weekly workflow `e2b-drift` runs the tests of `integrations/e2b`
   and the Kind test of the E2B classes against the newest `e2b` below 3, not
   the version in `uv.lock`. It is not a required check.
+- Python client: `SandboxFleet.preflight_report()` and
+  `AsyncSandboxFleet.preflight_report()` return a `PreflightReport`: a
+  `connectivity` check, one check per loaded image's derived template and
+  golden snapshot (`GetImageStatus`), and a `placement` check
+  (`ListPlacementDomains`, narrowed by `node_selector` and `placement`). An RPC
+  that the server does not serve makes its check `skipped`.
+  `preflight_report(strict=True)` raises `PreflightError` naming the failed
+  checks. `preflight()` does not change (FL-1 to FL-4).
 - `integrations/e2b`: the package `ate-env-e2b` (e2b 2.63 to below 3, Python
   3.11 or newer). `ate_env_e2b.Sandbox` and `ate_env_e2b.AsyncSandbox` are
   subclasses of `e2b.Sandbox` and `e2b.AsyncSandbox`: a program changes its
@@ -370,6 +378,14 @@ user needs to know across them.
   dataset tag loses its `/var/run/ko/` prefix. `bench reap -prefix run-` writes `run` as the run id of
   `events/reap.jsonl`, and `bench upload` copies the bundle's files into
   `gs://<bucket>/<folder>/` itself, not into a `<folder>/<dir>/` subdirectory.
+- `swebench-loader run -task-order round` (eval): run replay k of every image
+  before replay k+1 instead of an image's replays back to back, which with
+  `-placement` had sent them to one node at once. The default `image` order is
+  unchanged and records no label; a `round` run records `task_order=round`,
+  which `report -arm` compares, so the two orders do not pool. `round` is
+  refused with `-strategy`, which plans its own order. With `-domain-width`
+  the order applies in each domain's queue. `run_fleet_bench.py` refuses
+  `--label task_order`, as the loader does.
 - swebench-loader: `run -delete-rate` caps the environment deletes per second
   through ate-env-api (default 200; 0 removes the cap), and a delete the
   bucket rate-limits (429, `ResourceExhausted`) is retried with backoff for
@@ -630,6 +646,15 @@ user needs to know across them.
   stays as a re-export of the new module, with the same names.
 
 ### Fixed
+- swebench-loader: the step loop's park (`-mode steps` without `-strategy`
+  and without the working-set flags) sends a suspend again when it fails
+  with a transient error: gRPC `Unavailable`, `DeadlineExceeded`, `Unknown`,
+  `Internal` or `Aborted`. It pauses `-wake-backoff` between attempts,
+  doubling up to five times that, and stops when the next pause would end
+  after `-wake-budget`: at most 20 attempts with the defaults. Before, the
+  first such error failed the suspend. The `suspend` event covers every
+  attempt and the pauses and carries `attempts`; the report counts it as
+  `retried`.
 - `bench report -dest` finishes on runs with tens of millions of events. It
   reads the event files once, one file at a time. Of the events it keeps only
   the `ttfic` and `wake` fields that the restore join reads, and only when the

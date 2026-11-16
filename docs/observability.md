@@ -222,6 +222,7 @@ NeMo Gym rollout benchmark (`integrations/nemo-gym/benchmarks/rollout_bench.py`,
 | Phase | What it times |
 |---|---|
 | `preflight` | the backend's connectivity, permission and capacity checks |
+| `preflight_report` | `fleet.preflight_report()`: the connectivity, image and placement checks; `error` when `strict=True` raises |
 | `plan` | sizing the run: one entry per image, resolving its template |
 | `preflight_images` | `FleetConfig(preflight=True)`: the whole image pre-flight, from `setup()` or `run()`, before the pools |
 | `ensure_template` | resolving or creating the template for an image, once per image |

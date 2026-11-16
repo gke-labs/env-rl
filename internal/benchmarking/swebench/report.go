@@ -46,8 +46,8 @@ type Stat struct {
 	P95MS  float64 `json:"p95_ms"`
 	P99MS  float64 `json:"p99_ms,omitempty"`
 	MaxMS  float64 `json:"max_ms"`
-	// Retried counts ttfi and wake events that took more than one attempt:
-	// the environment was not serving when first asked.
+	// Retried counts ttfi, wake and park suspend events that took more than
+	// one attempt.
 	Retried       int     `json:"retried,omitempty"`
 	SizeMBP50     float64 `json:"size_mb_p50,omitempty"`
 	SizeMBP95     float64 `json:"size_mb_p95,omitempty"`

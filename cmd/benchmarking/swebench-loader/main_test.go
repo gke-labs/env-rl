@@ -1153,6 +1153,35 @@ func TestRunCmdPlacementFlag(t *testing.T) {
 	}
 }
 
+// -task-order reaches the run: a round run's run event carries the label, and
+// round with -strategy is refused before the run starts.
+func TestRunCmdTaskOrderFlag(t *testing.T) {
+	const digest = "sha256:" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "cmd.jsonl")
+	if err := os.WriteFile(manifest, []byte(`{"kind":"command","instance_id":"a","image":"reg/a@`+digest+`","command":"true"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runCmd([]string{"-dataset", manifest, "-dry-run", "-task-order", "round", "-strategy", "naive"})
+	if err == nil || !strings.Contains(err.Error(), "task order round belongs to eval's loop; it cannot be combined with a strategy") {
+		t.Errorf("-task-order round with -strategy: err = %v, want a refusal", err)
+	}
+
+	testBackendOverride = e2eFakeBackend{}
+	t.Cleanup(func() { testBackendOverride = nil })
+	events := filepath.Join(dir, "events.jsonl")
+	if err := runCmd([]string{"-dataset", manifest, "-task-order", "round", "-tasks-per-image", "2", "-run-id", "to", "-out", events, "-width", "1"}); err != nil {
+		t.Fatalf("run with -task-order round: %v", err)
+	}
+	raw, err := os.ReadFile(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"task_order":"round"`) {
+		t.Errorf("run event lacks the task_order label:\n%s", raw)
+	}
+}
+
 func TestReportCmdPreflightCoverageTakesOneEventsFile(t *testing.T) {
 	err := reportCmd([]string{"-arm", "a=nofile.jsonl", "-preflight-coverage", "cov.json"}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "-preflight-coverage") {

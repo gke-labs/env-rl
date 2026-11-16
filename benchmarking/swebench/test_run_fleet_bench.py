@@ -316,7 +316,7 @@ def test_swebench_gold_smoke_wake_retry_and_validation(tmp_path):
         rfb.run_benchmark(["--dataset", str(swe_manifest), "--strategy=naive", "--window-size=2", "--dry-run"])
     with pytest.raises(ValueError, match="single-pass"):
         rfb.run_benchmark(["--dataset", str(swe_manifest), "--mode=steps", "--steps=2", "--dry-run"])
-    for key in ("width", "placement", "domain_width"):
+    for key in ("width", "placement", "task_order", "domain_width"):
         with pytest.raises(ValueError, match="loader records that key itself"):
             rfb.run_benchmark(["--dataset", str(swe_manifest), f"--label={key}=10", "--dry-run"])
     with pytest.raises(ValueError, match="does not read it"):

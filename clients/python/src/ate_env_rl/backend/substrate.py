@@ -26,6 +26,8 @@ import zlib
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import grpc
+
 from ..client import DEFAULT_ATESPACE, Client
 from ..config import WARM_POOL_RUN_ID, TracerConfig
 from ..errors import (
@@ -34,6 +36,7 @@ from ..errors import (
     NotFoundError,
     PermissionDeniedError,
     PreflightError,
+    RpcError,
     SandboxStartError,
 )
 from ..loop_runner import _STOP_ROUNDS, LoopRunner
@@ -62,12 +65,38 @@ from ..telemetry.tracing import (
 from ..types import (
     DataPlaneEndpoint,
     EnvironmentSpec,
+    GoldenSnapshotState,
     PlacementDomain,
+    PreflightCheck,
     RawSandboxInstance,
 )
 from .base import BackendDriver
 
 logger = logging.getLogger("ate_env_rl.backend.substrate")
+
+
+def _preflight_error_check(name: str, err: BaseException) -> PreflightCheck:
+    """A preflight check for an RPC error: skipped for UNIMPLEMENTED (FL-3)."""
+    if isinstance(err, RpcError) and err.code == grpc.StatusCode.UNIMPLEMENTED:
+        return PreflightCheck(name, "skipped", f"the server does not serve it: {err}")
+    return PreflightCheck(name, "failed", f"{type(err).__name__}: {err}")
+
+
+def _pools_with_nodes(
+    pools: Sequence[PlacementDomain], selector: Mapping[str, str]
+) -> list[PlacementDomain]:
+    """The pools with active nodes whose labels match ``selector``: where a
+    create that sends that worker selector can land."""
+    return [
+        p for p in pools
+        if p.nodes > 0 and all(p.selector.get(k) == v for k, v in selector.items())
+    ]
+
+
+# How many GetImageStatus calls preflight_report() keeps in flight. The
+# client sets no per-call deadline and the driver has no setting for one, so
+# a call that does not answer holds its slot until the caller gives up.
+_PREFLIGHT_STATUS_CONCURRENCY = 8
 
 
 # How long a reap, and close(), wait for the background deletes a cancelled
@@ -575,6 +604,95 @@ class SubstrateBackendDriver(BackendDriver):
     def preflight(self) -> None:
         self._sync(self.preflight_async())
 
+    async def preflight_checks_async(self, images: Sequence[str]) -> list[PreflightCheck]:
+        """The checks of ``SandboxFleet.preflight_report()`` after connectivity (FL-1).
+
+        A ``placement`` check (``ListPlacementDomains`` for the base
+        template): ok when, for each worker selector the creates of
+        ``images`` send (the fleet's ``node_selector`` with each image's
+        ``placement`` labels over it, as ``worker_selector_for`` builds it),
+        a pool with nodes matches; with no image, the ``node_selector``
+        alone. An image routed through ``image_templates`` creates from
+        another template and adds no selector.
+
+        One ``image:<image>`` check per digest-pinned image that creates
+        derive a template for (``GetImageStatus``, at most
+        ``_PREFLIGHT_STATUS_CONCURRENCY`` calls in flight): failed when its
+        golden snapshot's bake failed or when neither the base template nor
+        the derived template exists, else ok with the template and golden
+        state. An RPC that answers UNIMPLEMENTED makes its checks skipped
+        (FL-3); any other error makes them failed with the error.
+        """
+        template = self.default_template or "default-template"
+        base_missing = False
+        try:
+            domains = await self.client.list_placement_domains(
+                template_name=template, atespace=self.atespace
+            )
+        except Exception as e:  # noqa: BLE001 - reported, not raised
+            base_missing = isinstance(e, NotFoundError)
+            placement = _preflight_error_check("placement", e)
+        else:
+            placement = self._placement_check(images, domains)
+
+        derived = [i for i in images if i not in self.image_templates and _DIGEST.search(i)]
+        slots = asyncio.Semaphore(_PREFLIGHT_STATUS_CONCURRENCY)
+
+        async def status(image: str) -> Any:
+            async with slots:
+                return await self.client.image_status(
+                    image, template_name=template, atespace=self.atespace
+                )
+
+        answers = await asyncio.gather(*(status(i) for i in derived), return_exceptions=True)
+        by_image = dict(zip(derived, answers, strict=True))
+        checks: list[PreflightCheck] = []
+        for image in images:
+            name = f"image:{image}"
+            if image not in by_image:
+                checks.append(PreflightCheck(name, "skipped", "no derived template"))
+                continue
+            st = by_image[image]
+            if isinstance(st, BaseException):
+                if not isinstance(st, Exception):
+                    raise st
+                checks.append(_preflight_error_check(name, st))
+                continue
+            detail = f"template {st.template.name} exists={st.template_exists} golden={st.golden.name}"
+            if st.golden == GoldenSnapshotState.FAILED:
+                checks.append(PreflightCheck(name, "failed", f"{detail}: {st.golden_error}"))
+            elif base_missing and not st.template_exists:
+                # A derived template that exists is used as is: the server
+                # reads the base template only to derive a missing one.
+                checks.append(PreflightCheck(
+                    name, "failed", f"{detail}: the base template {template!r} does not exist"
+                ))
+            else:
+                checks.append(PreflightCheck(name, "ok", detail))
+        return [*checks, placement]
+
+    def _placement_check(
+        self, images: Sequence[str], domains: Sequence[PlacementDomain]
+    ) -> PreflightCheck:
+        """The ``placement`` check of preflight_checks_async for the base
+        template's pools ``domains``."""
+        selectors: dict[tuple[tuple[str, str], ...], dict[str, str]] = {}
+        for image in images:
+            if image not in self.image_templates:
+                sel = self.worker_selector_for(image) or {}
+                selectors[tuple(sorted(sel.items()))] = sel
+        if not selectors:
+            selectors[()] = self.worker_selector_for(None) or {}
+        pools = ", ".join(f"{d.name}: {d.nodes} nodes, {d.node_slots} slots/node" for d in domains)
+        unmatched = [sel for sel in selectors.values() if not _pools_with_nodes(domains, sel)]
+        if not unmatched:
+            return PreflightCheck("placement", "ok", pools)
+        missing = "; ".join(f"no pool with nodes matches the worker selector {sel}" for sel in unmatched)
+        return PreflightCheck("placement", "failed", f"{missing} ({pools or 'no placement domain'})")
+
+    def preflight_checks(self, images: Sequence[str]) -> list[PreflightCheck]:
+        return self._sync(self.preflight_checks_async(images))
+
     async def preflight_images_async(
         self,
         images: Sequence[str],
@@ -719,10 +837,7 @@ class SubstrateBackendDriver(BackendDriver):
         entries: list[PlacementEntry] = []
         for image in pinned:
             selector = self.worker_selector_for(image) or {}
-            hit = [
-                p for p in pools
-                if p.nodes > 0 and all(p.selector.get(k) == v for k, v in selector.items())
-            ]
+            hit = _pools_with_nodes(pools, selector)
             if not hit:
                 logger.warning(
                     "image pre-flight: no pool of template %s with active nodes matches the "
