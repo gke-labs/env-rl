@@ -363,6 +363,68 @@ async def test_full_lifecycle(client):
     await _wait_until_deleted(env)
 
 
+async def _list_all(client, **kwargs) -> list:
+    """Follow next_page_token to the end; fail on a token that repeats."""
+    found = []
+    token = ""
+    seen_tokens = set()
+    while True:
+        page = await client.list_environments(page_token=token, **kwargs)
+        found.extend(page.environments)
+        token = page.next_page_token
+        if not token:
+            return found
+        assert token not in seen_tokens, f"next_page_token {token!r} came twice"
+        seen_tokens.add(token)
+
+
+async def test_list_environments(client):
+    """ListEnvironments against the real control plane (AE-6, AE-8 to AE-10).
+
+    Substrate's page token goes to the caller and back, create_time comes
+    from the actor, a status filter keeps a suspended environment, and an
+    atespace that does not exist is an empty page.
+    """
+    run = uuid.uuid4().hex[:8]
+    ids = [f"pye2e-list-{run}-{i}" for i in range(3)]
+    envs = []
+    try:
+        for env_id in ids:
+            envs.append(await client.create(env_id, template_name=TEMPLATE))
+
+        # One environment for each read: the walk needs a token at least twice.
+        listed = [e for e in await _list_all(client, page_size=1) if e.id in ids]
+        assert sorted(e.id for e in listed) == ids, "each environment comes once"
+        for e in listed:
+            assert e.atespace == "ate-env"
+            assert e.create_time is not None
+            assert e.create_time == (await client.get(e.id)).create_time
+
+        # A suspended environment passes a SUSPENDED filter and no RUNNING one.
+        suspended = envs[0]
+        await _wait_until_serving(suspended)
+        await suspended.suspend()
+        await _wait_for_status(client, suspended, EnvironmentStatus.SUSPENDED)
+        by_status = await _list_all(client, page_size=1, statuses=[EnvironmentStatus.SUSPENDED])
+        assert suspended.id in [e.id for e in by_status]
+        assert all(e.status == EnvironmentStatus.SUSPENDED for e in by_status)
+        running = await _list_all(client, statuses=[EnvironmentStatus.RUNNING])
+        assert suspended.id not in [e.id for e in running]
+
+        # An atespace that nobody created: an empty page, where a get is NotFound.
+        missing = f"pye2e-no-atespace-{run}"
+        page = await client.list_environments(atespace=missing)
+        assert page.environments == () and page.next_page_token == ""
+        with pytest.raises(NotFoundError):
+            await client.get(ids[0], atespace=missing)
+    finally:
+        for env in envs:
+            try:
+                await env.delete()
+            except EnvError as e:
+                pytest.fail(f"cleanup delete of {env.id} failed: {e}")
+
+
 async def test_create_from_image_rejects_unpinned_image(client):
     # Validated before anything touches the control plane.
     with pytest.raises(InvalidArgumentError):
