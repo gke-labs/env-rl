@@ -115,6 +115,20 @@ func TestListEnvironmentsReturnsOneAtespace(t *testing.T) {
 	if len(resp.GetEnvironments()) != 0 || resp.GetNextPageToken() != "" {
 		t.Errorf("ListEnvironments(empty) = %v, token %q, want no environments and no token", envIDs(resp.GetEnvironments()), resp.GetNextPageToken())
 	}
+
+	// An atespace that nobody created is not an error for a list, as in
+	// Substrate, whose scoped list does not check the atespace. A get in it
+	// is NotFound.
+	resp, err = client.ListEnvironments(ctx, &ateenvv1alpha.ListEnvironmentsRequest{Atespace: "never-created"})
+	if err != nil {
+		t.Fatalf("ListEnvironments(never-created): %v", err)
+	}
+	if len(resp.GetEnvironments()) != 0 || resp.GetNextPageToken() != "" {
+		t.Errorf("ListEnvironments(never-created) = %v, token %q, want no environments and no token", envIDs(resp.GetEnvironments()), resp.GetNextPageToken())
+	}
+	if _, err := client.GetEnvironment(ctx, &ateenvv1alpha.GetEnvironmentRequest{Id: "a", Atespace: "never-created"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetEnvironment in never-created = %v, want NotFound", err)
+	}
 }
 
 // TestListEnvironmentsPageSize checks AE-7: page_size 0 reads the default, a
