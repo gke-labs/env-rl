@@ -64,9 +64,9 @@ actor. The orphan rule above must not delete that object: it would take the labe
 from a live environment. The other order (the actor first, then one write of the object with the
 `uid`, and a delete of the actor with its uid as the precondition when that write fails) has no
 second write; its crash window leaves an actor without an object, thus an environment without the
-deadline that its caller asked for. The order is open point EM-E. Today
-`internal/ate.Client.CreateActor` drops the actor that `CreateActor` returns; pull request 1 keeps
-its uid in either order.
+deadline that its caller asked for. The order is open point EM-E. `internal/ate.Client.CreateActor`
+returns the actor that `CreateActor` returns (since #392, which reads its `create_time`); pull
+request 1 keeps its uid in either order.
 
 ### The sweep
 
