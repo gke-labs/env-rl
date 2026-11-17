@@ -114,8 +114,9 @@ a log line and in a metric. The environment stays, with its labels and its past 
 count is written in place, with the uid and the resource version of the object as the precondition:
 a delete and a create would give the object a new create time, and a crash between the two would
 lose the labels and the deadline. That write needs the verb `update`, which the Role of pull request
-1 does not grant; pull request 3 adds it (see the next section). A delete by a caller, or a new
-`SetEnvironmentTimeToLive`, clears the mark.
+1 does not grant; pull request 3 adds it (see the next section). A new `SetEnvironmentTimeToLive`
+clears the count and the mark of the object, which stays. A caller's `DeleteEnvironment` that
+succeeds removes the object, and the mark with it; one that fails leaves the object as it is.
 
 To know that an object is an orphan, the sweep must read the actor, and actors are not in the
 informer. That is a read from Substrate in each replica on each interval: one `GetActor` for each
