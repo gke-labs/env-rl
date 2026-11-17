@@ -14,10 +14,13 @@
 
 from __future__ import annotations
 
+import atexit
 import collections
 import contextvars
 import dataclasses
 import logging
+import os
+import signal
 import threading
 import time
 import uuid
@@ -56,6 +59,109 @@ from .types import (
 )
 
 logger = logging.getLogger("ate_env_rl.fleet")
+
+
+class _ExitHooks:
+    """The process-wide teardown of every fleet with ``exit_hooks=True``.
+
+    One ``atexit`` hook and one ``SIGINT``/``SIGTERM`` handler serve all live
+    fleets. The handlers are installed when a fleet registers on the main
+    thread and none is installed yet, and restored when the last fleet
+    unregisters on the main thread; off the main thread they stay installed
+    and find no fleet. The hooks act only in the process that registered the
+    fleets: a forked child does not tear down its parent's run.
+    """
+
+    _SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
+    def __init__(self) -> None:
+        # Reentrant: a signal handler runs on the main thread between
+        # bytecodes, possibly while that thread holds this lock.
+        self._lock = threading.RLock()
+        self._fleets: dict[int, SandboxFleet] = {}
+        self._pid = os.getpid()
+        self._atexit_registered = False
+        # The handler that each signal had before ours, while ours is installed.
+        self._prev: dict[int, Any] = {}
+
+    def register(self, fleet: SandboxFleet) -> None:
+        with self._lock:
+            if self._pid != os.getpid():
+                # A forked child: the fleets of the parent are not its own.
+                self._fleets.clear()
+                self._pid = os.getpid()
+            self._fleets[id(fleet)] = fleet
+            if not self._atexit_registered:
+                atexit.register(self._at_exit)
+                self._atexit_registered = True
+            if threading.current_thread() is threading.main_thread():
+                for signum in self._SIGNALS:
+                    current = signal.getsignal(signum)
+                    if current == signal.SIG_IGN:
+                        continue
+                    # An earlier unregister keeps the saved handler of a
+                    # signal whose handler it did not restore, or other code
+                    # restored the saved disposition while a fleet was live.
+                    # Install ours again when that saved handler is current
+                    # once more.
+                    if signum in self._prev and current != self._prev[signum]:
+                        continue
+                    self._prev[signum] = signal.signal(signum, self._on_signal)
+
+    def unregister(self, fleet: SandboxFleet) -> None:
+        with self._lock:
+            self._fleets.pop(id(fleet), None)
+            if self._fleets:
+                return
+            if self._atexit_registered:
+                atexit.unregister(self._at_exit)
+                self._atexit_registered = False
+            if self._prev and threading.current_thread() is threading.main_thread():
+                restored = []
+                for signum, prev in self._prev.items():
+                    # Leave a handler that was installed after ours.
+                    if signal.getsignal(signum) == self._on_signal:
+                        signal.signal(signum, signal.SIG_DFL if prev is None else prev)
+                        restored.append(signum)
+                for signum in restored:
+                    self._prev.pop(signum, None)
+
+    def _live_fleets(self) -> list[SandboxFleet]:
+        with self._lock:
+            if self._pid != os.getpid():
+                return []
+            return list(self._fleets.values())
+
+    def _teardown_all(self, why: str) -> None:
+        for fleet in self._live_fleets():
+            try:
+                fleet.teardown()
+            except Exception:
+                logger.exception("Fleet %s: teardown at %s failed", fleet.run_id, why)
+
+    def _at_exit(self) -> None:
+        self._teardown_all("interpreter exit")
+
+    def _on_signal(self, signum: int, frame: Any) -> None:
+        # A second signal during a teardown runs this handler again, and its
+        # reap runs inside the first one. The mock and Substrate drivers
+        # tolerate that; a driver whose reap is not reentrant can fail here.
+        with self._lock:
+            prev = self._prev.get(signum, signal.SIG_DFL)
+        try:
+            self._teardown_all(f"signal {signal.Signals(signum).name}")
+        finally:
+            if prev is None or prev == signal.SIG_DFL:
+                # The default disposition: deliver the signal again with it.
+                with self._lock:
+                    self._prev.pop(signum, None)
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+            elif prev != signal.SIG_IGN:
+                prev(signum, frame)  # default_int_handler raises KeyboardInterrupt
+
+
+_EXIT_HOOKS = _ExitHooks()
 
 
 def _connectivity_check(probe: Callable[[], Any]) -> PreflightCheck:
@@ -140,6 +246,8 @@ class SandboxFleet:
         self.preflight_coverage: PreflightCoverage | None = None
         self._preflight_for: frozenset[str] | None = None
 
+        self._active_handles: dict[int, SandboxHandle] = {}
+
         # Initialize Backend Driver
         if driver is not None:
             self.backend = driver
@@ -180,10 +288,20 @@ class SandboxFleet:
         except AttributeError:  # a driver that refuses new attributes
             pass
 
+        self._register_hooks()
+
     @property
     def observer(self) -> Observer:
         """The fleet's Observer (phases, tasks, claims, warm replicas)."""
         return self._obs
+
+    def _register_hooks(self) -> None:
+        if self.config.exit_hooks:
+            _EXIT_HOOKS.register(self)
+
+    def _unregister_hooks(self) -> None:
+        if self.config.exit_hooks:
+            _EXIT_HOOKS.unregister(self)
 
     def __enter__(self) -> SandboxFleet:
         return self
@@ -408,6 +526,7 @@ class SandboxFleet:
         """Run preflight, plan, and pre-warm all planned images."""
         if tasks is not None:
             self.load_tasks(tasks)
+        self._register_hooks()
         self.preflight()
         # The image pre-flight comes before the pools: a pool filled first
         # would boot on cold nodes.
@@ -608,7 +727,11 @@ class SandboxFleet:
             raise
 
         claim_source = str(raw_inst.metadata.get("claim_source", "direct"))
-        return SandboxHandle(
+        def _on_release(h):
+            with self._lock:
+                self._active_handles.pop(id(h), None)
+
+        handle = SandboxHandle(
             sandbox_id=raw_inst.instance_id,
             endpoint=data_plane.address if data_plane else raw_inst.endpoint,
             task=task_obj,
@@ -619,8 +742,13 @@ class SandboxFleet:
             default_timeout_s=self.config.step_timeout_s,
             tracer=self._tracer,
             claim_source=claim_source,
+            _on_release=_on_release,
             _acquire_started_at=acquire_started_at,
         )
+
+        with self._lock:
+            self._active_handles[id(handle)] = handle
+        return handle
 
     def _build_runtime(
         self, raw_inst: RawSandboxInstance
@@ -647,40 +775,47 @@ class SandboxFleet:
     def release(self, handle: SandboxHandle | Sequence[SandboxHandle]) -> None:
         """Release sandbox instance(s) back to backend and close runtime(s)."""
         for h in handle if isinstance(handle, (list, tuple)) else (handle,):
-            with self._obs.phase("release", backend=self.backend_label, family=repo_family(h.task)):
-                h.release()
-                if self.backend_label == "mock" and is_trace_mode():
-                    record_trace_event(
-                        "delete",
-                        env=h.sandbox_id,
-                        dur_ms=0.0,
-                        ok=True,
-                        run=self.run_id,
-                        instance=h.task.id if h.task else None,
-                        image=h.task.image if h.task else None,
-                    )
+            self._release_one(h, recycle=False)
 
     def recycle(self, handle: SandboxHandle | Sequence[SandboxHandle]) -> None:
         """Return sandbox instance(s) to the warm pool (see SandboxHandle.recycle)."""
         for h in handle if isinstance(handle, (list, tuple)) else (handle,):
-            with self._obs.phase("recycle", backend=self.backend_label, family=repo_family(h.task)):
-                h.recycle()
-                if self.backend_label == "mock" and is_trace_mode():
-                    record_trace_event(
-                        "suspend",
-                        env=h.sandbox_id,
-                        dur_ms=0.0,
-                        ok=True,
-                        run=self.run_id,
-                        instance=h.task.id if h.task else None,
-                        image=h.task.image if h.task else None,
-                    )
+            self._release_one(h, recycle=True)
+
+    def _release_one(self, h: SandboxHandle, recycle: bool) -> bool:
+        """Release or recycle one handle; returns whether this call did it.
+
+        A handle that is released already, or being released, records no
+        phase and no trace event.
+        """
+        if h._release_started():
+            return False
+        phase, event = ("recycle", "suspend") if recycle else ("release", "delete")
+        with self._obs.phase(phase, backend=self.backend_label, family=repo_family(h.task)):
+            if not h._release_sync(recycle=recycle):
+                return False
+            if self.backend_label == "mock" and is_trace_mode():
+                record_trace_event(
+                    event,
+                    env=h.sandbox_id,
+                    dur_ms=0.0,
+                    ok=True,
+                    run=self.run_id,
+                    instance=h.task.id if h.task else None,
+                    image=h.task.image if h.task else None,
+                )
+        return True
 
     def teardown(self) -> None:
         """Teardown all resources provisioned by this fleet's run_id."""
         try:
             with self._obs.phase("teardown", backend=self.backend_label):
                 self.backend.reap(self.run_id)
+            # The reap deleted every handed-out environment. Replaced without
+            # _lock: a signal handler runs teardown() on the main thread,
+            # possibly while that thread holds _lock.
+            self._active_handles = {}
+            self._unregister_hooks()
         finally:
             self._obs.warm_reset()
             # The next setup() or run() warms again.
@@ -696,6 +831,7 @@ class SandboxFleet:
         strat_fn = STRATEGIES.get(self.config.strategy)
         if not strat_fn:
             raise ValueError(f"Unknown strategy: {self.config.strategy}")
+        self._register_hooks()
         c = concurrency or min(self.config.max_concurrent, len(self._tasks))
         with self._obs.run(self.config.strategy, backend=self.backend_label) as report:
             self.report = report
@@ -848,3 +984,24 @@ class SandboxFleet:
                     res = (base, image)
                 self._image_to_template[image] = res
             return res
+
+    def release_all(self) -> int:
+        """Release each handed-out handle that is not yet released or recycled.
+
+        Returns how many this call released. Every handle is tried; the first
+        release error is raised after the others ran. A handle stays in the
+        fleet until its release succeeds, so a later call retries the ones
+        that failed, or that an interrupt left untried.
+        """
+        with self._lock:
+            handles = list(self._active_handles.values())
+        errors: list[Exception] = []
+        released = 0
+        for h in handles:
+            try:
+                released += self._release_one(h, recycle=False)
+            except Exception as e:  # noqa: BLE001 - raised after the others ran
+                errors.append(e)
+        if errors:
+            raise errors[0]
+        return released

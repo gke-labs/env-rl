@@ -20,7 +20,10 @@
 // EnvAtespaceHeader (optional) and EnvPortHeader, or, for clients that cannot
 // set headers (WebSocket clients, browsers), with a path prefix that the proxy
 // strips: /v1alpha/envs/{id}/ports/{port}/... in the default atespace, or
-// /v1alpha/atespaces/{atespace}/envs/{id}/ports/{port}/... . The proxy opens
+// /v1alpha/atespaces/{atespace}/envs/{id}/ports/{port}/... . With
+// Options.PortHostSuffix a request can also name its target in its Host,
+// <port>-<id>.<suffix> or <port>-<id>.<atespace>.<suffix> (see ServeHost), for
+// clients that need a plain URL for a port. The proxy opens
 // an HTTP CONNECT tunnel through the atenet router's CONNECT listener, naming
 // the actor in ate-target-actor and the port in the CONNECT authority. The
 // router (Substrate v0.6.0) accepts the tunnel at once and resumes a suspended
@@ -39,7 +42,7 @@
 // token does not reach the daemon. A WebSocket client that cannot set headers
 // presents a port capability instead (see CapabilityUser). Either way, a daemon
 // behind it must
-// authenticate its own clients. The path form refuses
+// authenticate its own clients. The path form and the hostname form refuse
 // requests that a browser sends from another origin (see Options.TrustedOrigins),
 // so a web page cannot drive a daemon through a port-forwarded listener.
 package portproxy
@@ -157,8 +160,16 @@ type Options struct {
 	// deadline ends a wait on a daemon that never answers.
 	ResponseHeaderTimeout time.Duration
 	// TrustedOrigins are browser origins (scheme://host[:port]) allowed to use
-	// the path form from a page they serve, next to the listener's own origin.
+	// the path form and the hostname form from a page they serve, next to the
+	// request's own origin.
 	TrustedOrigins []string
+	// PortHostSuffix, when set, turns on the hostname form: a request whose
+	// Host is <port>-<id>.<PortHostSuffix>, or
+	// <port>-<id>.<atespace>.<PortHostSuffix>, goes to that environment port
+	// (see ServeHost). It is a domain name that serves nothing else: the
+	// suffix and every name below it belong to the form. Empty means the
+	// form is off, and a Host names no target.
+	PortHostSuffix string
 	// WakeBudget bounds how long dial retries a CONNECT that the router
 	// refuses with 503, which Substrate v0.6.0's router does only at the
 	// Envoy level (overload, drain), never for an actor state. Zero means
@@ -238,8 +249,8 @@ type Proxy struct {
 	statePanicAt time.Time
 }
 
-// New returns a Proxy. It fails only on a malformed trusted origin or
-// atespace.
+// New returns a Proxy. It fails only on a malformed trusted origin, atespace
+// or host suffix.
 func New(opts Options) (*Proxy, error) {
 	if opts.HostSuffix == "" {
 		opts.HostSuffix = ate.DefaultHostSuffix
@@ -249,6 +260,13 @@ func New(opts Options) (*Proxy, error) {
 	}
 	if opts.WakeBudget <= 0 {
 		opts.WakeBudget = DefaultWakeBudget
+	}
+	if opts.PortHostSuffix != "" {
+		suffix, err := NormalizeHostSuffix(opts.PortHostSuffix)
+		if err != nil {
+			return nil, err
+		}
+		opts.PortHostSuffix = suffix
 	}
 	p := &Proxy{opts: opts, cop: http.NewCrossOriginProtection()}
 	for _, o := range opts.TrustedOrigins {
@@ -306,8 +324,20 @@ func Wants(r *http.Request) bool {
 // mux would redirect a missing trailing slash, "//" and "..", and WebSocket
 // clients do not follow redirects. Both forms route on the path as sent (see
 // requestPath) and forward the path and query of the request-target as sent.
+//
+// With Options.PortHostSuffix, the Host is read first, and a request takes
+// exactly one form. A request whose Host is the suffix or a name below it
+// belongs to the hostname form whatever its headers and its path are: it
+// goes to p.ServeHost, inside the mw wrappers, when the Host names a target,
+// and gets 400 here when it does not. It never reaches next, a gRPC call
+// included, nor another form. The 400 is not wrapped: it serves nothing, and
+// it tells the caller more than a wrapper that refuses the Host would.
 func Dispatch(p *Proxy, next http.Handler, mw ...func(http.Handler) http.Handler) http.Handler {
 	var proxy http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := p.hostFormName(r.Host); ok {
+			p.ServeHost(w, r)
+			return
+		}
 		if isPathForm(requestPath(r.URL)) {
 			p.ServePath(w, r)
 			return
@@ -318,6 +348,14 @@ func Dispatch(p *Proxy, next http.Handler, mw ...func(http.Handler) http.Handler
 		proxy = m(proxy)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if name, ok := p.hostFormName(r.Host); ok {
+			if _, err := parseHost(name, p.opts.PortHostSuffix, p.opts.DefaultAtespace); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			proxy.ServeHTTP(w, r)
+			return
+		}
 		if Wants(r) || isPathForm(requestPath(r.URL)) {
 			proxy.ServeHTTP(w, r)
 			return
@@ -332,8 +370,8 @@ type target struct {
 	port     int
 	// path and rawPath, when set, replace the request's path upstream:
 	// rawPath is the path as sent, byte for byte, and path its decoding.
-	// The path form strips its routing prefix; the header form keeps the
-	// whole path.
+	// The path form strips its routing prefix; the header form and the
+	// hostname form keep the whole path.
 	path, rawPath string
 	// dropAuthorization removes the Authorization header upstream: it
 	// carried the caller's credential for the API, not the daemon's.
@@ -361,7 +399,7 @@ func parseTarget(r *http.Request, defaultAtespace string) (target, error) {
 	return makeTarget(r.Header.Get(EnvIDHeader), r.Header.Get(EnvAtespaceHeader), r.Header.Get(EnvPortHeader), defaultAtespace)
 }
 
-// makeTarget validates a target from either form.
+// makeTarget validates a target from any form.
 func makeTarget(id, atespace, portStr, defaultAtespace string) (target, error) {
 	t := target{id: id, atespace: atespace}
 	if !label.MatchString(t.id) {
@@ -490,9 +528,19 @@ func (p *Proxy) ServePath(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if !p.authenticate(w, r, &t) || !p.inScope(w, t) {
+	if !p.authenticate(w, r, &t) || !p.inScope(w, t) || !p.sameOrigin(w, r) {
 		return
 	}
+	p.forward(w, r, t)
+}
+
+// sameOrigin answers 403 and returns false for a request that a browser
+// sends from another origin than the request's own Host or a trusted one,
+// when it is a state-changing method or a WebSocket handshake. In the
+// hostname form each environment port is an origin of its own, thus a page
+// of one environment port is another origin for each other port, although
+// the same site.
+func (p *Proxy) sameOrigin(w http.ResponseWriter, r *http.Request) bool {
 	check := r
 	if r.Header.Get("Upgrade") != "" {
 		// CrossOriginProtection lets safe methods through; judge a handshake
@@ -503,9 +551,9 @@ func (p *Proxy) ServePath(w http.ResponseWriter, r *http.Request) {
 	if err := p.cop.Check(check); err != nil {
 		http.Error(w, "cross-origin request to an environment port refused; "+
 			"add the page's origin to the port proxy's trusted origins", http.StatusForbidden)
-		return
+		return false
 	}
-	p.forward(w, r, t)
+	return true
 }
 
 // ServeHTTP forwards r to the environment port its headers name.

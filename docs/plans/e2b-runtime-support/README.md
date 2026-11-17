@@ -49,17 +49,17 @@ Non-goals:
 
 ### 2.2 What sandboxenv-rl has
 
-| E2B needs                          | sandboxenv-rl on `main`                                                                  |
-| ---------------------------------- | ---------------------------------------------------------------------------------------- |
-| envd inside any image              | Runtime layers: an image volume plus a guest sidecar with a readiness URL                |
-| One URL, header routing to a port  | The port proxy's header form (`X-Env-Id`, `X-Env-Atespace`, `X-Env-Port`), streaming     |
-| A credential the daemon never sees | `X-Env-Authorization`; the proxy checks and removes it, and forwards `Authorization`     |
-| create, kill, pause, resume        | `CreateEnvironment`, `DeleteEnvironment`, `SuspendEnvironment`, wake on the next request |
-| Template ID to image               | A registered template by name, or `rootfs_image` on a base template (derived template)   |
-| List, metadata                     | `ListEnvironments` lists one atespace (#392). Missing: no labels on an environment       |
-| Timeout (kill after N seconds)     | Missing: no time to live (#76 covers auto-suspend only)                                  |
-| `get_host(port)` hostname          | Missing: the port proxy has header and path forms, no hostname form                      |
-| Egress rules                       | Missing: no per-environment network policy                                               |
+| E2B needs                          | sandboxenv-rl on `main`                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| envd inside any image              | Runtime layers: an image volume plus a guest sidecar with a readiness URL                                          |
+| One URL, header routing to a port  | The port proxy's header form (`X-Env-Id`, `X-Env-Atespace`, `X-Env-Port`), streaming                               |
+| A credential the daemon never sees | `X-Env-Authorization`; the proxy checks and removes it, and forwards `Authorization`                               |
+| create, kill, pause, resume        | `CreateEnvironment`, `DeleteEnvironment`, `SuspendEnvironment`, wake on the next request                           |
+| Template ID to image               | A registered template by name, or `rootfs_image` on a base template (derived template)                             |
+| List, metadata                     | `ListEnvironments` lists one atespace (#392). Missing: no labels on an environment                                 |
+| Timeout (kill after N seconds)     | Missing: no time to live (#76 covers auto-suspend only)                                                            |
+| `get_host(port)` hostname          | The port proxy's hostname form, off unless `--port-proxy-host-suffix` is set (#388); the class does not use it yet |
+| Egress rules                       | Missing: no per-environment network policy                                                                         |
 
 ## 3. Options
 
@@ -164,7 +164,7 @@ proxy's answer, and `integrations/e2b/README.md` documents which exception that 
 | `commands.*`, `pty.*`, `files.*`, `git.*`                   | Inherited: envd through the port proxy                          |
 | `timeout`, `set_timeout`                                    | Refused or warned (D-2) until an environment has a time to live |
 | `metadata`, `Sandbox.list`                                  | Refused until environments have labels (the list RPC is #392)   |
-| `get_host`, `download_url`, `upload_url`                    | Refused until the port proxy has a hostname form                |
+| `get_host`, `download_url`, `upload_url`                    | Refused until the class uses the port proxy's hostname form     |
 | `allow_internet_access=False`, `network`, `update_network`  | Refused: needs per-environment egress policy in Substrate       |
 | Forks, snapshots, metrics, volumes, MCP, `iam`, `lifecycle` | Refused: no equivalent                                          |
 

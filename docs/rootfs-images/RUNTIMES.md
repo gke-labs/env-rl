@@ -150,6 +150,13 @@ reason for each.
   yet. The NeMo Gym
   provider hands this out as its `endpoint(handle, port)`
   ([integrations/nemo-gym](../../integrations/nemo-gym/README.md)).
+
+  The hostname form is for clients that need a plain URL for the port. It is
+  off unless the operator sets `--port-proxy-host-suffix <domain>` and
+  provides wildcard DNS and TLS for the domain in front of `ate-env-api`.
+  Then a request whose `Host` is `<port>-<id>.<domain>` (or
+  `<port>-<id>.<atespace>.<domain>`) reaches the port with its whole path.
+  The caller checks are the same as in the path form.
 - **The runtime must listen on `0.0.0.0`.** The router reaches the port on
   the actor's address. A runtime bound to `127.0.0.1` serves only processes
   inside the environment, and requests from outside fail with 502.
@@ -157,7 +164,10 @@ reason for each.
   for each caller that has its bearer token (in `X-Env-Authorization` or
   `Authorization`), to any port of any actor in the atespaces
   `--port-proxy-atespaces` names; with `--insecure-no-auth`, for any caller
-  that reaches its listener. A runtime that executes commands or edits files
+  that reaches its listener. This holds for each form, the hostname form
+  included: a name of a port is not a public URL. With the hostname form, the
+  runtimes of all environments are under one domain, thus a runtime must not
+  trust a cookie alone. A runtime that executes commands or edits files
   must check its own credential, as OpenSandbox's `execd` token and the
   OpenHands agent-server's session key do. See the README section "Reaching a
   service inside an environment" for the browser checks and the flags.

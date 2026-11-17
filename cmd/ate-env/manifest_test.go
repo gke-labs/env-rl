@@ -1682,3 +1682,62 @@ func TestManifestRejectsBadMetricsPort(t *testing.T) {
 		}
 	}
 }
+
+// PP-12: --port-proxy-host-suffix sets ate-env-api's -port-proxy-host-suffix
+// on the Deployment and adds no object: wildcard DNS and TLS are the
+// operator's. Without the flag the argument is absent.
+func TestManifestPortProxyHostSuffix(t *testing.T) {
+	kinds := func(out string) []string {
+		var got []string
+		for line := range strings.SplitSeq(out, "\n") {
+			if strings.HasPrefix(line, "kind: ") {
+				got = append(got, line)
+			}
+		}
+		return got
+	}
+	plain, err := runManifest(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain, "port-proxy-host-suffix") {
+		t.Errorf("-port-proxy-host-suffix rendered without the flag:\n%s", plain)
+	}
+	out, err := runManifest(t, "--port-proxy-host-suffix=ports.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out, "- -port-proxy-host-suffix=ports.example\n"); n != 1 {
+		t.Errorf("-port-proxy-host-suffix=ports.example rendered %d times, want once:\n%s", n, out)
+	}
+	if got, want := kinds(out), kinds(plain); len(want) == 0 || !slices.Equal(got, want) {
+		t.Errorf("the flag changed the objects: %q, want %q", got, want)
+	}
+	for _, bad := range []string{"*.ports.example", "https://ports.example", "ports.example:443", "10.0.0.1"} {
+		if _, err := runManifest(t, "--port-proxy-host-suffix="+bad); err == nil || !strings.Contains(err.Error(), "--port-proxy-host-suffix") {
+			t.Errorf("--port-proxy-host-suffix=%s: err = %v, want a --port-proxy-host-suffix error", bad, err)
+		}
+	}
+	// PP-13: a suffix that covers a name of the API is refused.
+	for _, args := range [][]string{
+		{"--port-proxy-host-suffix=svc.cluster.local"},
+		{"--port-proxy-host-suffix=ate-env.svc"},
+		{"--port-proxy-host-suffix=team-env.svc", "--namespace=team-env"},
+		{"--port-proxy-host-suffix=localhost"},
+		{"--port-proxy-host-suffix=internal.example", "--api-allowed-hosts=lb.internal.example"},
+		{"--port-proxy-host-suffix=corp.example", "--api-allowed-hosts=*.corp.example"},
+	} {
+		if _, err := runManifest(t, args...); err == nil || !strings.Contains(err.Error(), "--port-proxy-host-suffix") {
+			t.Errorf("%q: err = %v, want a --port-proxy-host-suffix error", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"--port-proxy-host-suffix=ports.localhost"},
+		{"--port-proxy-host-suffix=ports.internal.example", "--api-allowed-hosts=lb.internal.example"},
+		{"--port-proxy-host-suffix=ports.corp.example", "--api-allowed-hosts=*.corp.example"},
+	} {
+		if _, err := runManifest(t, args...); err != nil {
+			t.Errorf("%q: %v, want the manifest", args, err)
+		}
+	}
+}

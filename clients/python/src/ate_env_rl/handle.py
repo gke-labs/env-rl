@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -74,6 +75,11 @@ class SandboxHandle:
     # than one that merely repeats ready_to_first_command.
     _acquire_started_at: float | None = field(default=None, repr=False, compare=False)
     _first_command_started: bool = field(default=False, init=False, repr=False, compare=False)
+    _on_release: Any = field(default=None, repr=False, compare=False)
+    # _released: a release or recycle succeeded. _releasing: one is running.
+    _released: bool = field(default=False, init=False, repr=False, compare=False)
+    _releasing: bool = field(default=False, init=False, repr=False, compare=False)
+    _release_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
 
     # Commands that grade a task when the caller passes no ``phase``: the
     # SWE-bench / R2E graders. ``exec(..., phase="grade")`` is the explicit
@@ -421,25 +427,75 @@ class SandboxHandle:
         """Run post-boot initialization script inside the guest container."""
         return self.runtime.initialize(init_script=init_script, cwd=cwd, timeout_s=timeout_s)
 
-    def release(self) -> None:
-        """Release this sandbox back to the backend or terminate it."""
+    def _begin_release(self) -> bool:
+        """Claim the release: False when it is done or another caller runs it."""
+        with self._release_lock:
+            if self._released or self._releasing:
+                return False
+            self._releasing = True
+            return True
+
+    def _end_release(self, ok: bool) -> None:
+        """Mark the handle released only when the backend call succeeded, so
+        a failed, interrupted or cancelled release can run again."""
+        with self._release_lock:
+            self._releasing = False
+            self._released = ok
+        if ok and self._on_release:
+            self._on_release(self)
+
+    def _release_started(self) -> bool:
+        return self._released or self._releasing
+
+    def _release_sync(self, recycle: bool) -> bool:
+        """Release or recycle once; returns whether this call did it."""
+        if not self._begin_release():
+            return False
+        ok = False
         try:
-            self.backend.release(self.sandbox_id, recycle=False)
+            try:
+                self.backend.release(self.sandbox_id, recycle=recycle)
+                ok = True
+            finally:
+                self.runtime.close()
         finally:
-            self.runtime.close()
+            self._end_release(ok)
+        return True
+
+    async def _release_async(self, recycle: bool) -> bool:
+        """Release or recycle once; returns whether this call did it."""
+        if not self._begin_release():
+            return False
+        ok = False
+        try:
+            try:
+                if hasattr(self.backend, "release_async"):
+                    await self.backend.release_async(self.sandbox_id, recycle=recycle)
+                else:
+                    self.backend.release(self.sandbox_id, recycle=recycle)
+                ok = True
+            finally:
+                if hasattr(self.runtime, "close_async"):
+                    await self.runtime.close_async()
+                else:
+                    self.runtime.close()
+        finally:
+            self._end_release(ok)
+        return True
+
+    def release(self) -> None:
+        """Release this sandbox back to the backend or terminate it.
+
+        After a release or recycle that succeeded, a call does nothing; so does
+        a call while another caller releases the handle. A release that failed
+        or was interrupted can be called again."""
+        self._release_sync(recycle=False)
 
     async def release_async(self) -> None:
-        """Asynchronously release this sandbox back to the backend or terminate it."""
-        try:
-            if hasattr(self.backend, "release_async"):
-                await self.backend.release_async(self.sandbox_id, recycle=False)
-            else:
-                self.backend.release(self.sandbox_id, recycle=False)
-        finally:
-            if hasattr(self.runtime, "close_async"):
-                await self.runtime.close_async()
-            else:
-                self.runtime.close()
+        """Asynchronously release this sandbox back to the backend or terminate it.
+
+        Runs once per handle, as ``release`` does."""
+        await self._release_async(recycle=False)
 
     def recycle(self) -> None:
         """Return sandbox to warm pool.
@@ -447,11 +503,10 @@ class SandboxHandle:
         Note: This suspends the actor and places it back in the pool without
         resetting filesystem or process state. The next claim will receive
         the actor in the state left by the previous workload.
+
+        Runs once per handle, as ``release`` does.
         """
-        try:
-            self.backend.release(self.sandbox_id, recycle=True)
-        finally:
-            self.runtime.close()
+        self._release_sync(recycle=True)
 
     async def recycle_async(self) -> None:
         """Asynchronously return sandbox to warm pool.
@@ -459,17 +514,10 @@ class SandboxHandle:
         Note: This suspends the actor and places it back in the pool without
         resetting filesystem or process state. The next claim will receive
         the actor in the state left by the previous workload.
+
+        Runs once per handle, as ``release`` does.
         """
-        try:
-            if hasattr(self.backend, "release_async"):
-                await self.backend.release_async(self.sandbox_id, recycle=True)
-            else:
-                self.backend.release(self.sandbox_id, recycle=True)
-        finally:
-            if hasattr(self.runtime, "close_async"):
-                await self.runtime.close_async()
-            else:
-                self.runtime.close()
+        await self._release_async(recycle=True)
 
     def __enter__(self) -> SandboxHandle:
         return self

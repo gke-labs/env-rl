@@ -820,8 +820,46 @@ pre-flight first). With `async with fleet:`, `setup()` and `teardown()`
 run outside `run()`, so their `preflight`, `plan`, `warm_pool` and `teardown`
 phases go to the Prometheus series and spans but not to the report; the exit
 awaits `teardown()` and then `close_async()`, which closes the backend on the
-event loop (`close()` blocks the calling thread). The sync `SandboxFleet.run`
+event loop (`close()` blocks the calling thread). `release_all()` (awaitable
+on `AsyncSandboxFleet`) releases each handle not yet released or recycled and
+returns how many it released. A handle stays in the fleet until its release
+succeeds, so after an error, an interrupt or a cancellation a second call
+retries the rest. The sync `SandboxFleet.run`
 does setup and teardown inside the run, so its report has every phase.
+
+With `FleetConfig(exit_hooks=True)` a `SandboxFleet` that is not torn down
+tears down once at interpreter exit or on `SIGINT`/`SIGTERM`, then calls the
+handler that was installed before (for the defaults: `KeyboardInterrupt` on
+`SIGINT`, the default action of `SIGTERM`), also when the teardown fails. If a
+teardown fails or is interrupted, the `atexit` hook remains to retry at
+interpreter exit. The retry runs the reap again; the Substrate driver's reap
+does not retry a delete that failed. Signals whose disposition is `SIG_IGN`
+are not intercepted.
+All such fleets share one `atexit` hook and one handler per signal. The
+handlers are installed only from the main thread, and the last teardown on the
+main thread restores earlier handlers (leaving any handler installed after
+ours). The hooks do nothing in a forked child (a data-loader worker, for
+example): only the process that made the fleet tears it down. Because signal
+handlers run synchronous teardown on the main thread, a signal arriving while
+non-reentrant backend or observer locks are held can hang; processes should
+allow fallback termination via `SIGKILL` if necessary. `AsyncSandboxFleet`
+refuses `exit_hooks=True` with a `ValueError`
+([#398](https://github.com/ai-on-gke/sandboxenv-rl/issues/398)), because the
+hooks run the sync teardown, which cannot reach clients that belong to the
+caller's event loop. Tear an async fleet down yourself:
+
+```python
+async def main() -> None:
+    loop = asyncio.get_running_loop()
+    stop = asyncio.Event()
+    loop.add_signal_handler(signal.SIGTERM, stop.set)
+    fleet = AsyncSandboxFleet(config)
+    try:
+        ...  # the run; check stop.is_set() between steps
+    finally:
+        await fleet.teardown()
+        await fleet.close_async()
+```
 
 **Prometheus** (`metrics` extra; `ObservabilityConfig.enable_metrics`).
 The default, `None`, records the series whenever `prometheus_client` is

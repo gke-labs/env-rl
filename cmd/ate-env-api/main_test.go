@@ -215,3 +215,54 @@ func TestPortProxyOptionsWiresStateReadAndAuth(t *testing.T) {
 		t.Error("Authenticate set without -auth-token-file")
 	}
 }
+
+// TestCheckPortProxyHostSuffix: a host suffix that cannot work is an error of
+// the start (PP-13). The suffix must not cover a name of the API: localhost,
+// a Service name or a name of --allowed-hosts. A suffix with the port proxy
+// off (--atenet-connect empty) would start and then answer the Host check's
+// 403 for each name under it.
+func TestCheckPortProxyHostSuffix(t *testing.T) {
+	service := []string{"ate-env-api", "ate-env-api.ate-env", "ate-env-api.ate-env.svc", "ate-env-api.ate-env.svc.cluster.local"}
+	allowed := []string{"lb.internal.example", "*.corp.example"}
+	const connect = "atenet-router.ate-system.svc.cluster.local:8444"
+	for _, tc := range []struct {
+		suffix, connect string
+		service         []string
+		allowed         []string
+		wantErr         string
+	}{
+		{"", connect, service, allowed, ""},
+		// The form is off: the port proxy can be off too.
+		{"", "", service, allowed, ""},
+		{"ports.example", connect, service, allowed, ""},
+		{"ports.internal.example", connect, service, allowed, ""},
+		{"ports.example", connect, nil, nil, ""},
+		// The port proxy is off: nothing serves the names under the suffix.
+		{"ports.example", "", service, allowed, "--atenet-connect"},
+		{"ports.example", "", nil, nil, "--atenet-connect"},
+		// A name of the API, or a name above one.
+		{"ate-env.svc", connect, service, allowed, "ate-env-api.ate-env.svc"},
+		{"svc.cluster.local", connect, service, allowed, "ate-env-api.ate-env.svc.cluster.local"},
+		{"internal.example", connect, service, allowed, "lb.internal.example"},
+		{"corp.example", connect, service, allowed, "*.corp.example"},
+		{"ate-env.svc", connect, nil, allowed, ""}, // no Service names known: nothing to cover
+		// Not a domain name of two labels or more.
+		{"localhost", connect, service, allowed, "one label"},
+		{"com", connect, nil, nil, "one label"},
+		{"https://ports.example", connect, service, allowed, "not a domain name"},
+		// A wrong suffix is named also when the port proxy is off.
+		{"com", "", nil, nil, "one label"},
+	} {
+		err := checkPortProxyHostSuffix(tc.suffix, tc.connect, tc.service, tc.allowed)
+		switch {
+		case tc.wantErr == "" && err != nil:
+			t.Errorf("checkPortProxyHostSuffix(%q, %q) = %v, want no error", tc.suffix, tc.connect, err)
+		case tc.wantErr != "" && err == nil:
+			t.Errorf("checkPortProxyHostSuffix(%q, %q) = nil, want an error with %q", tc.suffix, tc.connect, tc.wantErr)
+		case tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr):
+			t.Errorf("checkPortProxyHostSuffix(%q, %q) = %v, want an error with %q", tc.suffix, tc.connect, err, tc.wantErr)
+		case err != nil && !strings.Contains(err.Error(), "--port-proxy-host-suffix"):
+			t.Errorf("checkPortProxyHostSuffix(%q, %q) = %v, want the flag name in the error", tc.suffix, tc.connect, err)
+		}
+	}
+}

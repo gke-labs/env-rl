@@ -216,6 +216,10 @@ class FleetConfig:
     strategy: StrategyType = "sliding"
     template: str | None = None
     image_templates: dict[str, str] = field(default_factory=dict)
+    # Off by default. True installs an atexit hook and, from the main thread,
+    # SIGINT/SIGTERM handlers that tear the SandboxFleet down. AsyncSandboxFleet
+    # refuses it (#398): await teardown() in a try/finally instead.
+    exit_hooks: bool = False
 
     # Sizing & Rollout parameters
     batch_size: int = 8

@@ -751,6 +751,7 @@ Flags:
       --otlp-endpoint string                 OTLP/gRPC collector endpoint for ate-env-api's traces, set as OTEL_EXPORTER_OTLP_ENDPOINT, e.g. http://otel-collector.observability:4317
       --otlp-insecure                        set OTEL_EXPORTER_OTLP_INSECURE=true: talk to the collector in plaintext
       --port-proxy-atespaces string          comma-separated atespaces whose environments ate-env-api's port proxy forwards to, or * for any (defaults to ate-env)
+      --port-proxy-host-suffix string        domain of two labels or more that turns on the hostname form of ate-env-api's port proxy: <port>-<id>.<domain> and <port>-<id>.<atespace>.<domain> reach an environment port; the manifest renders no Ingress, DNS record or certificate for it (off when empty)
       --replicas int32                       number of pre-warmed worker pods (default 5)
       --template string                      ActorTemplate name (default "default-template")
       --worker-image string                  digest-pinned worker image for the worker pool, e.g. ateworker-gvisor built from the Substrate repo
@@ -848,7 +849,7 @@ deleted gets 404. A client stops on 410, because only a new environment helps. T
 answers, its 503, 404 and 504 included, pass unchanged.
 
 A caller that cannot retry the 503 asks the proxy to wait instead, with `X-Env-Wake-Wait: <seconds>`
-on the request (both forms): a whole number of seconds in decimal, such as `30`; `0` asks for no
+on the request (each form): a whole number of seconds in decimal, such as `30`; `0` asks for no
 wait, and any other syntax, or a repeated header, gets 400. The proxy then wakes the environment
 before it forwards anything, with the wait that guest gRPC calls use, and forwards the request once
 when the guest answers, so the daemon never gets a request or a body twice. The wait lasts at most
@@ -870,7 +871,7 @@ Clients that cannot set headers, such as WebSocket clients and browsers, put the
 instead: `/v1alpha/envs/{id}/ports/{port}/...`, or `/v1alpha/atespaces/{atespace}/envs/{id}/ports/{port}/...`
 outside `ate-env`. The API strips that prefix and forwards the rest, so a client given
 `http://localhost:7777/v1alpha/envs/dev1/ports/6000` as its base URL works unchanged. WebSocket upgrades pass
-through either form; gRPC to the daemon is not supported yet.
+through each form; gRPC to the daemon is not supported yet.
 
 ```bash
 curl -H "Authorization: Bearer $SUBSTRATE_ENV_AUTH_TOKEN" localhost:7777/v1alpha/envs/dev1/ports/6000/health
@@ -878,6 +879,40 @@ curl -H "Authorization: Bearer $SUBSTRATE_ENV_AUTH_TOKEN" localhost:7777/v1alpha
 
 The path form reaches the daemon exactly as sent: a path without the trailing slash is the daemon's
 root, and `//` or `..` after the prefix are not cleaned or redirected.
+
+**Hostname form.** A client that needs a plain URL for a port, with no header and no path prefix,
+uses a name of the port instead. The form is off by default. With `--port-proxy-host-suffix <domain>`
+(`ate-env manifest --port-proxy-host-suffix`), a request whose `Host` is `<port>-<id>.<domain>`
+goes to that port of that environment in `ate-env`, and `<port>-<id>.<atespace>.<domain>` to the
+environment in another atespace. The API forwards the whole path and the query as sent. The port
+is the part before the first `-`, thus an id can hold `-`. The `Host` is read without its port and
+without regard to case. This is the shape of E2B's sandbox hosts.
+
+```bash
+curl -H "Authorization: Bearer $SUBSTRATE_ENV_AUTH_TOKEN" -H 'Host: 6000-dev1.ports.example' localhost:7777/health
+```
+
+The caller checks are those of the path form: the token or, on a WebSocket handshake, a port
+capability; the atespaces of `--port-proxy-atespaces`; and the browser check below. The form adds
+no public URL: with `--auth-token-file`, a request without a credential gets 401. With
+`--insecure-no-auth` a name is as open as the listener is, like the other forms.
+
+The operator provides the rest, in front of `ate-env-api`; `ate-env manifest` renders no Ingress,
+DNS record or certificate:
+
+- Wildcard DNS for `*.<domain>`, and for `*.<atespace>.<domain>` for each atespace that a name
+  carries, and TLS certificates for the same wildcards. A wildcard covers one label.
+- A front that passes `Host` unchanged. The API reads `Host` only, never `X-Forwarded-Host`.
+- A domain that serves nothing else. The domain and each name below it answer for environment
+  ports only: another name there gets 400, also a name of the API and also a gRPC call. Reach the
+  API by a name outside the domain. `ate-env-api` does not start when the suffix covers
+  `localhost`, a name of its Service or a name in `--allowed-hosts`; it cannot see a name that
+  only a front proxy or a gRPC client uses.
+
+A request under the domain takes this form only. One that also carries `X-Env-Id`,
+`X-Env-Atespace` or `X-Env-Port` gets 400, and its path is the daemon's, also a path of the path
+form's shape. The first label of the name is a DNS label of at most 63 bytes, thus an id of more
+than 57 characters cannot be named with a port of five figures; the other forms reach it.
 
 **Who can use it.** The forwarding reaches environments only in the atespaces
 `--port-proxy-atespaces` names (default `ate-env`); a request for another atespace gets 403.
@@ -889,13 +924,13 @@ actor that runs the guest; the forwarding extends that reach to every port. Keep
 the cluster (the manifest's Service is `ClusterIP`), restrict it with a NetworkPolicy where other
 workloads share the cluster, and make each daemon check its own credential.
 
-With `--auth-token-file`, each forwarded request, in either form, must carry the API's token, in
+With `--auth-token-file`, each forwarded request, in each form, must carry the API's token, in
 `X-Env-Authorization: Bearer <token>` or in `Authorization: Bearer <token>`; the API answers 401
 otherwise. The token does not reach the daemon: the API strips `X-Env-Authorization`, and strips
 `Authorization` when it carried the token. Send the token in `X-Env-Authorization` when the daemon
 needs its own `Authorization`, such as an OpenAI-compatible server. A browser cannot add either
-header to a page load or a WebSocket handshake, thus with the token on, the path form serves
-scripted clients only.
+header to a page load or a WebSocket handshake, thus with the token on, the path form and the
+hostname form serve scripted clients only.
 
 A WebSocket client that cannot set headers sends a port capability instead of the token:
 `ate-env-capability:<capability>@` in the user info of the URL, which the client sends as
@@ -922,15 +957,34 @@ behind one listener share that origin, thus a page from one daemon can call anot
 check: a browser sends custom headers to another origin only after a CORS preflight, which the API
 never approves.
 
+In the hostname form each environment port is an origin of its own, and the same check applies:
+a page of one environment port cannot send a state-changing request or open a WebSocket to the
+name of another port, and no page there is same-origin with the API. The API accepts no cookie,
+thus a browser holds no credential that it sends by itself, except a port capability that it
+keeps from a URL, which opens only a WebSocket handshake from the port's own origin or a trusted
+one. The ports under one domain are still the same site. A daemon or a page in one environment can
+set a cookie for the whole domain (`Domain=<domain>`), and the browser then sends it to each other
+environment port and to each other host under the same registrable domain. The API does not stop
+that. Give the suffix a registrable domain of its own, apart from the sites of the operator, and
+do not let a daemon trust a cookie alone.
+
 **DNS rebinding.** A page on an attacker's name can make that name resolve to the listener, for
 example to a `kubectl port-forward` on 127.0.0.1, and then read the answers as its own origin. The
 listener refuses that: a request whose `Host` is not an IP address, `localhost`, a name under
 `.localhost`, a name of the API Service or a name in `--allowed-hosts` gets 403. The check covers
-each HTTP route, the MCP endpoint and both forms of the port proxy, over HTTP/1.x and HTTP/2 alike,
+each HTTP route, the MCP endpoint and each form of the port proxy, over HTTP/1.x and HTTP/2 alike,
 thus also behind a front proxy that speaks h2c to the listener. Only gRPC is not checked: HTTP/2
 requests with an `application/grpc` content type, which gRPC clients send to many different
 authorities. The check is a browser defense, not authentication: a client that sets its own `Host`
 passes, and the bearer token is the control for such callers, gRPC included.
+
+With `--port-proxy-host-suffix`, a name under the suffix passes the check only when it names an
+environment port, and only on the port proxy: `/healthz`, MCP and gRPC do not answer for it. The
+defense then rests on the same condition as a name in `--allowed-hosts`: the operator controls
+the domain, thus a page cannot make a name under it resolve to the listener. Do not set a suffix
+under a domain that another party controls. A suffix of one label, such as `com`, is refused at
+start: each `<port>-<id>.com` name would pass the check. No list of public suffixes is read, thus
+`co.uk` is not refused.
 
 The API Service's names are `ate-env-api`, `ate-env-api.<namespace>`, `ate-env-api.<namespace>.svc`
 and `ate-env-api.<namespace>.svc.<cluster domain>`. `ate-env-api` derives them itself from
@@ -951,7 +1005,8 @@ image keeps them. Add other names, such as an internal load balancer, with `--ap
 | `--atenet-client-cert` | none | PEM credential bundle presented to the router's TLS listeners: the pod identity bundle the kubelet projects. With it, `--atenet` and `--atenet-connect` default to the TLS ports (443 and 8444), which are the only ones Substrate v0.6.0 serves. Re-read at every handshake. |
 | `--atenet-ca-file` | none | PEM trust bundle that signs the router's serving certificate, the servicedns bundle. Required with `--atenet-client-cert`; re-read at every handshake. |
 | `--atenet-server-name` | `atenet-router.ate-system.svc` | Name the router's serving certificate must carry. |
-| `--port-proxy-trusted-origins` | none | Comma-separated browser origins allowed to use the path form. |
+| `--port-proxy-trusted-origins` | none | Comma-separated browser origins allowed to use the path form and the hostname form. |
+| `--port-proxy-host-suffix` | none | Domain name of two labels or more that turns on the hostname form: `<port>-<id>.<domain>` and `<port>-<id>.<atespace>.<domain>` reach an environment port. The domain and each name below it serve environment ports only. Empty leaves the form off. With an empty `--atenet-connect` the port proxy is off, and `ate-env-api` does not start with a suffix. `ate-env manifest --port-proxy-host-suffix` renders it. |
 | `--port-proxy-response-header-timeout` | `0`, no limit | Bound on the wait for a daemon's response headers. Without it, the caller's deadline ends the wait. |
 | `--port-proxy-wake-wait-cap` | `1m` | The longest wait that a request gets with `X-Env-Wake-Wait` while its environment wakes; a larger value in the header is cut to it. `0` or less turns the wait off: the header is still validated and stripped. |
 

@@ -24,7 +24,7 @@ import asyncio
 import inspect
 import logging
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from .config import FleetConfig
@@ -60,6 +60,16 @@ class AsyncSandboxFleet:
         *,
         sync_fleet: SandboxFleet | None = None,
     ):
+        cfg = sync_fleet.config if sync_fleet is not None else config
+        if cfg is not None and cfg.exit_hooks:
+            # The hooks call the sync teardown(), whose reap cannot reach
+            # clients that belong to the caller's event loop.
+            raise ValueError(
+                "AsyncSandboxFleet does not support FleetConfig(exit_hooks=True) "
+                "(https://github.com/ai-on-gke/sandboxenv-rl/issues/398); await "
+                "fleet.teardown() in a try/finally, or from a handler that "
+                "loop.add_signal_handler installs"
+            )
         self._fleet = sync_fleet or SandboxFleet(config, driver)
 
     def close(self, *, wait: bool = True) -> None:
@@ -425,7 +435,11 @@ class AsyncSandboxFleet:
             raise
 
         claim_source = str(raw_inst.metadata.get("claim_source", "direct"))
-        return SandboxHandle(
+        def _on_release(h):
+            with self._fleet._lock:
+                self._fleet._active_handles.pop(id(h), None)
+
+        handle = SandboxHandle(
             sandbox_id=raw_inst.instance_id,
             endpoint=data_plane.address if data_plane else raw_inst.endpoint,
             task=task_obj,
@@ -436,8 +450,13 @@ class AsyncSandboxFleet:
             default_timeout_s=self.config.step_timeout_s,
             tracer=self._fleet._tracer,
             claim_source=claim_source,
+            _on_release=_on_release,
             _acquire_started_at=acquire_started_at,
         )
+
+        with self._fleet._lock:
+            self._fleet._active_handles[id(handle)] = handle
+        return handle
 
     async def acquire_batch(
         self, tasks: list[Task | str], timeout_s: float | None = None
@@ -470,20 +489,31 @@ class AsyncSandboxFleet:
         raise errors[0]
 
     async def release(self, handle: SandboxHandle) -> None:
-        with self.observer.phase(
-            "release", backend=self._backend_label, family=repo_family(handle.task)
-        ):
-            await handle.release_async()
+        await self._release_one(handle, recycle=False)
+
+    async def _release_one(self, h: SandboxHandle, recycle: bool) -> bool:
+        """Release or recycle one handle; returns whether this call did it.
+
+        A handle that is released already, or being released, records no
+        phase and no trace event.
+        """
+        if h._release_started():
+            return False
+        phase, event = ("recycle", "suspend") if recycle else ("release", "delete")
+        with self.observer.phase(phase, backend=self._backend_label, family=repo_family(h.task)):
+            if not await h._release_async(recycle=recycle):
+                return False
             if self._backend_label == "mock" and is_trace_mode():
                 record_trace_event(
-                    "delete",
-                    env=handle.sandbox_id,
+                    event,
+                    env=h.sandbox_id,
                     dur_ms=0.0,
                     ok=True,
                     run=self._fleet.run_id,
-                    instance=handle.task.id if handle.task else None,
-                    image=handle.task.image if handle.task else None,
+                    instance=h.task.id if h.task else None,
+                    image=h.task.image if h.task else None,
                 )
+        return True
 
     async def teardown(self) -> None:
         try:
@@ -492,6 +522,8 @@ class AsyncSandboxFleet:
                     await self.backend.reap_async(self._fleet.run_id)
                 else:
                     await asyncio.to_thread(self.backend.reap, self._fleet.run_id)
+            # The reap deleted every handed-out environment.
+            self._fleet._active_handles = {}
         finally:
             self.observer.warm_reset()
             # The next setup() or run() warms again.
@@ -616,3 +648,26 @@ class AsyncSandboxFleet:
                     self._fleet._preflight_spent()
         logger.debug("\n%s", report.summary())
         return results
+
+    async def recycle(self, handle: SandboxHandle | Sequence[SandboxHandle]) -> None:
+        """Return sandbox instance(s) to the warm pool."""
+        for h in handle if isinstance(handle, (list, tuple)) else (handle,):
+            await self._release_one(h, recycle=True)
+
+    async def release_all(self) -> int:
+        """Release each handed-out handle that is not yet released or recycled.
+
+        Returns how many this call released. Every handle is tried; the first
+        release error is raised after the others ran. A handle stays in the
+        fleet until its release succeeds, so a later call retries the ones
+        that failed or that a cancellation stopped.
+        """
+        with self._fleet._lock:
+            handles = list(self._fleet._active_handles.values())
+        results = await asyncio.gather(
+            *(self._release_one(h, recycle=False) for h in handles), return_exceptions=True
+        )
+        errors = [r for r in results if isinstance(r, BaseException)]
+        if errors:
+            raise errors[0]
+        return sum(1 for r in results if r is True)

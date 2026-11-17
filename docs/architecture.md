@@ -107,14 +107,17 @@ child processes, and serves `ProcessService` and `FileSystemService`.
 
 - **`internal/hostcheck`**: Wraps `/healthz`, `/v1alpha/envs/{id}/mcp`, and the port proxy against
   DNS-rebinding attacks when accessed through local browser port-forwards. gRPC services use
-  interceptors for `BearerAuth` rather than `hostcheck`.
+  interceptors for `BearerAuth` rather than `hostcheck`. `WrapFor` lets the port proxy's route, and
+  no other, serve the names of the hostname form.
 - **`internal/mcp`**: Serves the Model Context Protocol endpoint at `POST /v1alpha/envs/{id}/mcp`.
   Translates tool calls into guest RPCs using pooled `ate.Client.DialGuest` connections.
 - **`internal/portproxy`**: Forwards HTTP/1.1 and WebSocket requests to arbitrary TCP ports inside
   the actor by dialing `atenet`'s HTTP `CONNECT` listener (`:8444`). Scoped to configured atespaces
   (`-port-proxy-atespaces`), pools tunnels per actor and port, validates port capabilities
   (`internal/portproxy/capability.go`) for headerless WebSocket clients, strips auth and capability
-  headers, and validates `Origin` headers on path routes.
+  headers, and validates `Origin` headers on path and hostname routes. A request names its target in
+  headers, in a path prefix or, with `-port-proxy-host-suffix`, in its `Host`
+  (`<port>-<id>[.<atespace>].<domain>`, `internal/portproxy/hostform.go`).
 
 ### CLI, SDKs, and integrations
 

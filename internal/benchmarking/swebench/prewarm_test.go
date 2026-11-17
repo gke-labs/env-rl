@@ -79,6 +79,12 @@ func TestPrewarmTemplatesEnsuresAndWaitsForGoldens(t *testing.T) {
 	}
 }
 
+// deadlineBudget bounds the cases that poll until the deadline. It also
+// covers the ensure call before the first poll. Under -race on a busy
+// machine that call can take more than 50 ms, and the case then fails at
+// the ensure instead of at the deadline.
+const deadlineBudget = 500 * time.Millisecond
+
 // A status poll the control plane cuts off keeps the image pending for the
 // next poll; a template that is gone between polls never settles.
 func TestPrewarmTemplatesPollFailures(t *testing.T) {
@@ -93,7 +99,7 @@ func TestPrewarmTemplatesPollFailures(t *testing.T) {
 	api = newPreflightFake()
 	api.goldenReadyAfter = 100
 	api.templateGone = map[string]bool{pfImgA: true}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), deadlineBudget)
 	defer cancel()
 	results, err = PrewarmTemplates(ctx, newFakeBackend(t, api), []string{pfImgA}, PrewarmOptions{WaitGolden: true, GoldenPoll: time.Millisecond})
 	if err == nil || results[0].OK() || !strings.Contains(err.Error(), "the derived template is gone") {
@@ -104,7 +110,7 @@ func TestPrewarmTemplatesPollFailures(t *testing.T) {
 	api = newPreflightFake()
 	api.goldenReadyAfter = 100
 	api.statusUnavailableFirst = map[string]int{pfImgA: 1 << 30}
-	ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel = context.WithTimeout(context.Background(), deadlineBudget)
 	defer cancel()
 	results, err = PrewarmTemplates(ctx, newFakeBackend(t, api), []string{pfImgA}, PrewarmOptions{WaitGolden: true, GoldenPoll: time.Millisecond})
 	if err == nil || results[0].OK() || !strings.Contains(err.Error(), "still pending") || !strings.Contains(err.Error(), "(last poll: ") || !strings.Contains(err.Error(), "api server restarting") {
@@ -402,7 +408,7 @@ func TestPrewarmTemplatesWithoutTheWaitAndWithGoldensDisabled(t *testing.T) {
 	// A golden that never settles fails the image when the timeout ends.
 	api = newPreflightFake()
 	api.goldenPendingForever = map[string]bool{pfImgA: true}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), deadlineBudget)
 	defer cancel()
 	results, err = PrewarmTemplates(ctx, newFakeBackend(t, api), []string{pfImgA}, PrewarmOptions{WaitGolden: true, GoldenPoll: time.Millisecond})
 	if err == nil || !strings.Contains(err.Error(), "still pending") || results[0].OK() {

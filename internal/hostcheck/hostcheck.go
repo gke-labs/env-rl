@@ -22,6 +22,9 @@
 // page read the answers. Refusing names the listener does not serve stops
 // that, for the MCP endpoint and the port proxy alike.
 //
+// WrapFor lets one route serve more names than the listener's own: the port
+// proxy's hostname form, whose names are under a domain the operator sets.
+//
 // Wrap wraps the HTTP routes (/healthz, MCP and the port proxy), while the
 // gRPC route on the mux stays unwrapped: gRPC clients send many different
 // authorities, the dial target among them. Every wrapped route checks r.Host
@@ -140,8 +143,27 @@ func (c *Checker) Allowed(hostport string) bool {
 // Wrap refuses a request whose Host is not allowed with 403 and passes all
 // other requests to next.
 func (c *Checker) Wrap(next http.Handler) http.Handler {
+	return c.wrap(next, nil)
+}
+
+// WrapFor returns a Wrap for one route that serves names of its own next to
+// the listener's: there, a request whose Host is not allowed passes when
+// serves reports that the route serves that Host. The port proxy's hostname
+// form is such a route: each environment port has a name under one operator
+// domain, and portproxy.(*Proxy).ServesHost accepts a name only when it names
+// a port. The names pass on that route alone; Wrap refuses them on each other
+// route.
+//
+// The rebinding defense holds for such a name as it does for a name in
+// --allowed-hosts, on the same condition: the operator controls the domain,
+// thus a page cannot make a name under it resolve to the listener.
+func (c *Checker) WrapFor(serves func(hostport string) bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler { return c.wrap(next, serves) }
+}
+
+func (c *Checker) wrap(next http.Handler, serves func(hostport string) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if c.Allowed(r.Host) {
+		if c.Allowed(r.Host) || serves != nil && serves(r.Host) {
 			next.ServeHTTP(w, r)
 			return
 		}

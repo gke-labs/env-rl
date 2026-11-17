@@ -28,6 +28,7 @@ import (
 
 	"github.com/agent-substrate/env/internal/apiservice"
 	"github.com/agent-substrate/env/internal/hostcheck"
+	"github.com/agent-substrate/env/internal/portproxy"
 	"github.com/agent-substrate/env/internal/routertls"
 	"github.com/agent-substrate/env/internal/sidecarenv"
 	"github.com/spf13/cobra"
@@ -144,6 +145,9 @@ type manifestConfig struct {
 	// (ate-env-api's -list-environments-atespaces); empty leaves the
 	// server default.
 	listAtespaces string
+	// portProxyHostSuffix is the domain of the port proxy's hostname form
+	// (ate-env-api's -port-proxy-host-suffix); empty leaves the form off.
+	portProxyHostSuffix string
 	// environmentMetadata turns on ate-env-api's store for the labels and
 	// the deadline of an environment: the server flag, a Role and a
 	// RoleBinding on ConfigMaps in the namespace, and the Kubernetes API
@@ -524,6 +528,15 @@ the "template" subcommand: ate-env manifest template`,
 			if _, err := hostcheck.New(mCfg.allowedHosts); err != nil {
 				return fmt.Errorf("--api-allowed-hosts: %w", err)
 			}
+			if mCfg.portProxyHostSuffix != "" {
+				// The names that callers use for the API, as far as the
+				// manifest knows them: ate-env-api checks again at start with
+				// the cluster's own DNS domain.
+				apiHosts := portproxy.APIHosts(hostcheck.ServiceHosts(apiName, mCfg.namespace, "cluster.local"), mCfg.allowedHosts)
+				if _, err := portproxy.CheckHostSuffix(mCfg.portProxyHostSuffix, apiHosts); err != nil {
+					return fmt.Errorf("--port-proxy-host-suffix: %w", err)
+				}
+			}
 			if err := writeManifests(cmd.OutOrStdout(), buildManifests(mCfg)); err != nil {
 				return err
 			}
@@ -547,6 +560,7 @@ the "template" subcommand: ate-env manifest template`,
 	cmd.Flags().StringVar(&mCfg.listAtespaces, "list-environments-atespaces", "", "comma-separated atespaces whose environments ate-env-api's ListEnvironments returns, or * for any (defaults to ate-env)")
 	cmd.Flags().BoolVar(&mCfg.environmentMetadata, "environment-metadata", false, "let ate-env-api keep the labels and the deadline of an environment, which Substrate has no field for, in one ConfigMap for each such environment in its namespace (--environment-store=configmaps). This gives ate-env-api what it does not have by default: the Kubernetes API token in its pod, and a Role to list, watch, create and delete the ConfigMaps of the namespace. Limits: docs/security/threat-model.md")
 	cmd.Flags().StringVar(&mCfg.portProxyAtespaces, "port-proxy-atespaces", "", "comma-separated atespaces whose environments ate-env-api's port proxy forwards to, or * for any (defaults to ate-env)")
+	cmd.Flags().StringVar(&mCfg.portProxyHostSuffix, "port-proxy-host-suffix", "", "domain of two labels or more that turns on the hostname form of ate-env-api's port proxy: <port>-<id>.<domain> and <port>-<id>.<atespace>.<domain> reach an environment port; the manifest renders no Ingress, DNS record or certificate for it (off when empty)")
 	cmd.Flags().StringSliceVar(&mCfg.allowedHosts, "api-allowed-hosts", nil, "extra host names that HTTP clients may use to reach ate-env-api, e.g. an internal load balancer name (a leading *. allows the names below it); the Service's in-cluster names, in the cluster's own DNS domain, IP addresses and localhost are always allowed")
 	cmd.Flags().BoolVar(&mCfg.routerTLS, "api-router-tls", true, "mount the pod identity certificate and the servicedns trust bundle into ate-env-api and dial the atenet router's TLS listeners, the only ones Substrate serves since v0.6.0; the API's SPIFFE ID must then be in the router's --ingress-allowed-spiffe-ids. Off, the API dials the plaintext addresses, which only the test fakes serve")
 	cmd.Flags().StringVar(&mCfg.workerPool, "workerpool", "", "WorkerPool name (defaults to <template>-workerpool)")
@@ -1193,6 +1207,9 @@ func buildAPIDeployment(cfg manifestConfig) *appsv1.Deployment {
 	}
 	if a := strings.TrimSpace(cfg.portProxyAtespaces); a != "" {
 		args = append(args, "-port-proxy-atespaces="+a)
+	}
+	if s := strings.TrimSpace(cfg.portProxyHostSuffix); s != "" {
+		args = append(args, "-port-proxy-host-suffix="+s)
 	}
 	if a := strings.TrimSpace(cfg.listAtespaces); a != "" {
 		args = append(args, "-list-environments-atespaces="+a)
