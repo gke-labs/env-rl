@@ -85,6 +85,7 @@ let
     # Go toolchain selected from go.mod's `go` directive (see goToolchain)
     goToolchain
     golangci-lint
+    gotestsum
 
     # Container, image, signing, and Kubernetes tooling
     ko
@@ -193,7 +194,8 @@ let
       go vet ./...
       echo "--> Go test (-race, -cover)..."
       ATE_ENV_GUEST_TARGET="" ATE_ENV_API_TARGET="" \
-        go test -race -covermode=atomic -coverpkg=./... -coverprofile="$covdir/go.out" ./... -args -test.gocoverdir="$covdir/go-unit"
+        gotestsum --format=standard-quiet --rerun-fails=1 --rerun-fails-abort-on-data-race --rerun-fails-run-root-test \
+          --packages=./... -- -race -covermode=atomic -coverpkg=./... -args -test.gocoverdir="$covdir/go-unit"
       echo "--> Go client guest-daemon integration (-race, -cover)..."
       run_go_guest_daemon_suite() (
         set -euo pipefail
@@ -240,7 +242,8 @@ let
         fi
 
         ATE_ENV_GUEST_TARGET="$addr" ATE_ENV_API_TARGET="" \
-          go test -race -count=1 -timeout 5m -covermode=atomic -coverpkg=./... ./clients/go -run '^TestE2EGuestDaemon$' -args -test.gocoverdir="$covdir/go-unit"
+          gotestsum --format=standard-quiet --rerun-fails=1 --rerun-fails-abort-on-data-race --rerun-fails-run-root-test \
+            --packages=./clients/go -- -race -count=1 -timeout 5m -covermode=atomic -coverpkg=./... -run '^TestE2EGuestDaemon$' -args -test.gocoverdir="$covdir/go-unit"
 
         kill -TERM "$daemon_pid"
         wait "$daemon_pid" 2>/dev/null || true
@@ -319,7 +322,7 @@ let
       base_env="$(nix build --no-link --print-out-paths .#python-env-base)"
       uni_agent_env="$(nix build --no-link --print-out-paths .#python-env-uni-agent)"
       echo "--> Python ruff check..."
-      ruff check clients/python examples/python-quickstart examples/verl_swebench hack/release hack/ci hack/verify
+      ruff check clients/python examples/python-quickstart examples/verl_swebench integrations/uni-agent hack/release hack/ci hack/verify
       ruff check --config clients/python/pyproject.toml examples/Qwen3-1.7B-verl
       ruff check benchmarking/telemetry_report
       # The base-env suites only mean something if the base env really lacks
@@ -341,10 +344,11 @@ let
 
       echo "--> Building instrumented guest daemon..."
       go build -cover -covermode=atomic -coverpkg=./... -o "$covdir/bin/guest-daemon-cover" ./examples/guest-daemon
-      echo "--> Python pytest suites (in parallel)..."
-      # Each suite writes its own log; logs print in a fixed order afterwards so
-      # the output doesn't interleave. The base-env client run shares a rootdir
-      # with the full one, so it skips the pytest cache to avoid racing on it.
+      max_jobs="''${CI_PYTHON_JOBS:-$(nproc)}"
+      echo "--> Python pytest suites (max $max_jobs in parallel)..."
+      # Each suite gets an isolated log and pytest cache_dir; logs print in fixed
+      # order afterwards so output never interleaves. On exit code 1 (test
+      # failure), failed items rerun once via --lf into a .retry coverage file.
       logs="$(mktemp -d)"
       names=()
       pids=()
@@ -358,19 +362,46 @@ let
         rm -rf "$logs"
       }
       trap cleanup_all EXIT INT TERM
-      suite() {
-        local name="$1" dir="$2"
+      # shellcheck disable=SC2329
+      run_pytest() {
+        local cov_file="$1" py_bin="$2"
         shift 2
-        (cd "$dir" && "$@") >"$logs/''${#pids[@]}.log" 2>&1 &
+        if [[ "$py_bin" == */* ]]; then
+          export PATH="''${py_bin%/*}:$PATH"
+        fi
+        local cache_dir="$logs/cache-$BASHPID" rc=0
+        local -a cmd=("$py_bin")
+        if [[ -n "$cov_file" ]]; then
+          cmd+=(-m coverage run --rcfile="$cov_rc")
+        fi
+        COVERAGE_FILE="$cov_file" "''${cmd[@]}" -m pytest "$@" -o "cache_dir=$cache_dir" || rc=$?
+        if [[ "$rc" -eq 1 && -s "$cache_dir/v/cache/lastfailed" ]]; then
+          echo "WARN: pytest failed on attempt 1; retrying failed items once (--lf)..."
+          rc=0
+          COVERAGE_FILE="''${cov_file:+$cov_file.retry}" "''${cmd[@]}" -m pytest "$@" -o "cache_dir=$cache_dir" --lf --last-failed-no-failures=none || rc=$?
+        fi
+        return "$rc"
+      }
+      suite() {
+        local name="$1" dir="$2" idx="''${#names[@]}"
+        shift 2
+        while (( $(jobs -rp | wc -l) >= max_jobs )); do
+          wait -n || true
+        done
+        (
+          trap 'echo $? >"'"$logs/$idx.rc"'"' EXIT
+          cd "$dir"
+          "$@"
+        ) >"$logs/$idx.log" 2>&1 &
         names+=("$name")
         pids+=("$!")
       }
 
       # shellcheck disable=SC2329
-      run_guest_daemon_suite() {
-        local port workspace daemon_pid ready
-        port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+      run_guest_daemon_suite() (
+        local workspace daemon_log daemon_pid="" addr=""
         workspace="$(mktemp -d)"
+        daemon_log="$workspace/daemon.log"
         mkdir -p "$workspace/logs"
 
         # shellcheck disable=SC2329
@@ -383,65 +414,63 @@ let
         }
         trap cleanup_daemon EXIT INT TERM
 
+        : >"$daemon_log"
         GOCOVERDIR="$covdir/go-daemon" "$covdir/bin/guest-daemon-cover" \
-          --listen "127.0.0.1:$port" \
+          --listen "127.0.0.1:0" \
           --workspace "$workspace" \
-          --log-dir "$workspace/logs" &
+          --log-dir "$workspace/logs" >"$daemon_log" 2>&1 &
         daemon_pid=$!
 
-        ready=0
         for _ in $(seq 1 50); do
-          if python3 -c "import socket; s=socket.create_connection(('127.0.0.1', $port), timeout=0.1); s.close()" 2>/dev/null; then
-            ready=1
+          addr="$(sed -nE 's/.*listening on gRPC (127\.0\.0\.1:[1-9][0-9]*).*/\1/p' "$daemon_log" | head -n1)"
+          if [[ -n "$addr" ]]; then
             break
           fi
           sleep 0.1
         done
 
-        if [[ "$ready" -ne 1 ]]; then
-          echo "guest daemon failed to start on 127.0.0.1:$port" >&2
+        if [[ -z "$addr" ]]; then
+          echo "guest daemon failed to start:" >&2
+          cat "$daemon_log" >&2
           exit 1
         fi
 
-        ATE_ENV_GUEST_TARGET="127.0.0.1:$port" \
-        COVERAGE_FILE="$covdir/py/.coverage.guest-daemon" \
-        coverage run --rcfile="$cov_rc" -m pytest clients/python/tests/e2e/test_guest_daemon.py -q
+        ATE_ENV_GUEST_TARGET="$addr" \
+          run_pytest "$covdir/py/.coverage.guest-daemon" python clients/python/tests/e2e/test_guest_daemon.py -q
 
         kill -TERM "$daemon_pid"
         wait "$daemon_pid" 2>/dev/null || true
         daemon_pid=""
-        rm -rf "$workspace"
-        trap - EXIT INT TERM
-      }
+      )
 
       suite "clients/python (full env)" clients/python \
-        env COVERAGE_FILE="$covdir/py/.coverage.client" coverage run --rcfile="$cov_rc" -m pytest -q
+        run_pytest "$covdir/py/.coverage.client" python -q
       suite "clients/python (base env, no tracing/metrics)" clients/python \
-        env COVERAGE_FILE="$covdir/py/.coverage.client-base" "$base_env/bin/python" -m coverage run --rcfile="$cov_rc" -m pytest -q -p no:cacheprovider
+        run_pytest "$covdir/py/.coverage.client-base" "$base_env/bin/python" -q
       suite "examples/Qwen3-1.7B-verl" . \
-        env COVERAGE_FILE="$covdir/py/.coverage.qwen" coverage run --rcfile="$cov_rc" -m pytest examples/Qwen3-1.7B-verl/tests -q
+        run_pytest "$covdir/py/.coverage.qwen" python examples/Qwen3-1.7B-verl/tests -q
       suite "integrations/nemo-gym" integrations/nemo-gym \
-        env COVERAGE_FILE="$covdir/py/.coverage.nemo" coverage run --rcfile="$cov_rc" -m pytest -q
+        run_pytest "$covdir/py/.coverage.nemo" python -q
       suite "integrations/uni-agent (Python 3.12)" . \
-        env PATH="$uni_agent_env/bin:$PATH" \
-        sh -c 'COVERAGE_FILE="'"$covdir"'/py/.coverage.uni-agent" python -m coverage run --rcfile="'"$cov_rc"'" -m pytest integrations/uni-agent/tests -q && ruff check integrations/uni-agent'
+        run_pytest "$covdir/py/.coverage.uni-agent" "$uni_agent_env/bin/python" integrations/uni-agent/tests -q
       suite "swebench" . \
-        env COVERAGE_FILE="$covdir/py/.coverage.swebench" coverage run --rcfile="$cov_rc" -m pytest internal/benchmarking/swebench/trajectories benchmarking/swebench -q
+        run_pytest "$covdir/py/.coverage.swebench" python internal/benchmarking/swebench/trajectories benchmarking/swebench -q
       # The report tool runs on both envs, like the client: its end-to-end test
       # traces a fleet and needs the telemetry extras.
       suite "benchmarking/telemetry_report (full env)" . \
-        env COVERAGE_FILE="$covdir/py/.coverage.telemetry-full" coverage run --rcfile="$cov_rc" -m pytest benchmarking/telemetry_report -q -p no:cacheprovider
+        run_pytest "$covdir/py/.coverage.telemetry-full" python benchmarking/telemetry_report -q
       suite "benchmarking/telemetry_report (base env)" . \
-        env COVERAGE_FILE="$covdir/py/.coverage.telemetry-base" "$base_env/bin/python" -m coverage run --rcfile="$cov_rc" -m pytest benchmarking/telemetry_report -q -p no:cacheprovider
+        run_pytest "$covdir/py/.coverage.telemetry-base" "$base_env/bin/python" benchmarking/telemetry_report -q
       # The Kind runner's access-policy helpers, over a scripted lib.run (no
       # cluster; hack/ci/test_smoke.py is the one that needs one).
       suite "hack/ci (e2e policy helpers)" . \
-        python -m pytest hack/ci/test_e2e_policy.py -q -p no:cacheprovider
+        run_pytest "" python hack/ci/test_e2e_policy.py -q
       suite "clients/python (guest daemon integration)" . run_guest_daemon_suite
 
+      wait || true
       failed=0
-      for i in "''${!pids[@]}"; do
-        if wait "''${pids[$i]}"; then status=ok; else status=FAILED; failed=1; fi
+      for i in "''${!names[@]}"; do
+        if [[ "$(cat "$logs/$i.rc" 2>/dev/null || echo 1)" -eq 0 ]]; then status=ok; else status=FAILED; failed=1; fi
         echo "--> ''${names[$i]}: $status"
         cat "$logs/$i.log"
       done

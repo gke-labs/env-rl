@@ -253,8 +253,8 @@ Conventions:
 
 ## OH-13: Substrate `274605f1`
 
-- Setup: the test cluster on Substrate `274605f1` (the version `main` pins since #254), ate-env from
-  `main`.
+- Setup: the test cluster on Substrate v1.0.0, which has the same runtime code as `274605f1` (`main`
+  pins v1.0.0 since #419 and pinned `274605f1` in #254), ate-env from `main`.
 - Commands: the OH-2, OH-3, OH-4 runs and OH-12.
 - Expected: unchanged results. Watch for the tmpfs `/tmp` and `/dev/shm` mounts (Substrate #3533)
   under the agent-server and R2E-Gym (copy targets, temp files, size), and the `capabilities.add`

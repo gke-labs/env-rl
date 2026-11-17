@@ -1,0 +1,83 @@
+{{/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+{{define "content"}}
+{{$s := .Summary}}
+<p class="crumbs"><a href="/">Fleet</a> / {{$s.Project}}</p>
+<h1>{{$s.Cluster}}{{with $s.Location}} <span class="muted">{{.}}</span>{{end}}
+  {{if $s.Stale}}<span class="badge stale">stale{{if $s.GeneratedAt}} {{age .Age}}{{end}}</span>{{else}}<span class="badge fresh">{{age .Age}} old</span>{{end}}</h1>
+<p class="muted"><a href="{{apiClusterURL $s.Project $s.Cluster}}">JSON</a></p>
+{{if $s.Error}}<p class="error">{{$s.Error}}</p>{{end}}
+{{with .Snapshot}}
+<p class="muted">Snapshot {{timestamp .GeneratedAt}} by ate-env-reporter {{.Reporter.Version}}{{with .Reporter.Commit}} ({{.}}){{end}} every {{.Reporter.IntervalSeconds}}s.</p>
+<p>{{len .Actors}} actors{{range $.States}} · <span class="st-text st-{{.State}}">{{.State}} {{.Count}}</span>{{end}}</p>
+
+<h2>ate-env-api deployments</h2>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Version</th><th>Image</th><th>Ready</th><th>Tracing</th><th>Metrics</th></tr>
+  {{range .Deployments}}<tr><td>{{.Namespace}}</td><td>{{.Name}}</td><td>{{or .Version "?"}}</td><td class="mono">{{.Image}}</td><td>{{.Ready}}</td><td>{{if .Tracing}}on{{else}}off{{end}}</td><td>{{if .MetricsPort}}:{{.MetricsPort}}{{else}}off{{end}}</td></tr>
+  {{else}}<tr><td colspan="7" class="muted">none</td></tr>{{end}}
+</table>
+
+<h2>WorkerPools</h2>
+<table>
+  <tr><th>Pool</th><th>Ready / desired</th><th>Workers (active)</th><th>CPU allocated / capacity</th><th>Memory allocated / capacity</th><th>Sandbox</th><th>Worker image</th></tr>
+  {{range $.Pools}}<tr><td>{{.Namespace}}/{{.Name}}</td><td{{if lt .ReadyReplicas .Replicas}} class="warn"{{end}}>{{.ReadyReplicas}} / {{.Replicas}}</td><td>{{.Workers}} ({{.Active}})</td><td>{{cpu .Allocated.CPUMillicores}} / {{cpu .Capacity.CPUMillicores}}</td><td>{{gib .Allocated.MemoryBytes}} / {{gib .Capacity.MemoryBytes}}</td><td>{{.SandboxClass}}{{with .SandboxConfig}} ({{.}}){{end}}</td><td class="mono">{{.WorkerImage}}</td></tr>
+  {{else}}<tr><td colspan="7" class="muted">none</td></tr>{{end}}
+</table>
+
+<h2>Workers</h2>
+<table>
+  <tr><th>Worker</th><th>Pool</th><th>Node</th><th>State</th><th>CPU allocated / capacity</th><th>Memory allocated / capacity</th></tr>
+  {{range .Workers}}<tr><td class="mono">{{.Name}}</td><td>{{.Namespace}}/{{.Pool}}</td><td>{{.Node}}</td><td>{{.State}}</td><td>{{cpu .Allocated.CPUMillicores}} / {{cpu .Capacity.CPUMillicores}}</td><td>{{gib .Allocated.MemoryBytes}} / {{gib .Capacity.MemoryBytes}}</td></tr>
+  {{else}}<tr><td colspan="6" class="muted">none</td></tr>{{end}}
+</table>
+
+<h2>Actors</h2>
+<form method="get" class="filters">
+  <label>Atespace <select name="atespace"><option value="">any</option>{{range $.AtespaceOptions}}<option value="{{.}}"{{if eq . $.Filter.Atespace}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label>Template <select name="template"><option value="">any</option>{{range $.TemplateOptions}}<option value="{{.}}"{{if eq . $.Filter.Template}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label>State <select name="state"><option value="">any</option>{{range $.StateOptions}}<option value="{{.}}"{{if eq . $.Filter.State}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label>Node <select name="node"><option value="">any</option>{{range $.NodeOptions}}<option value="{{.}}"{{if eq . $.Filter.Node}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <button type="submit">Filter</button>
+</form>
+<p class="muted">{{$.Matched}} match{{if $.Truncated}}; the first {{len $.Actors}} are shown{{end}}.</p>
+<table>
+  <tr><th>Atespace</th><th>Name</th><th>UID</th><th>Template</th><th>State</th><th>Node</th><th>Worker</th><th>Updated</th><th>Crash</th></tr>
+  {{range $.Actors}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td class="mono"><a href="{{eventsURL .UID}}">{{.UID}}</a></td><td>{{.Template}}{{with .SourceTag}} <span class="muted">from {{.}}</span>{{end}}</td><td><span class="st-text st-{{.State}}">{{.State}}</span></td><td>{{.AssignedNode}}</td><td class="mono">{{.Worker}}</td><td>{{timestamp .UpdateTime}}</td><td>{{with .Crash}}<span class="error">{{.Message}}</span>{{end}}</td></tr>
+  {{else}}<tr><td colspan="9" class="muted">none</td></tr>{{end}}
+</table>
+
+<h2>Templates</h2>
+<table>
+  <tr><th>Atespace</th><th>Name</th><th>Base</th><th>Rootfs image</th><th>WorkerPool</th><th>Golden</th></tr>
+  {{range .Templates}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td>{{.Base}}</td><td class="mono">{{.RootfsImage}}</td><td>{{.WorkerPool}}</td><td>{{.GoldenState}}</td></tr>
+  {{else}}<tr><td colspan="6" class="muted">none</td></tr>{{end}}
+</table>
+
+<div class="cols">
+<table>
+  <caption>Atespaces</caption>
+  <tr><th>Name</th><th>Created</th></tr>
+  {{range .Atespaces}}<tr><td>{{.Name}}</td><td>{{timestamp .CreateTime}}</td></tr>{{else}}<tr><td colspan="2" class="muted">none</td></tr>{{end}}
+</table>
+<table>
+  <caption>Tags</caption>
+  <tr><th>Atespace</th><th>Name</th><th>Source actor</th></tr>
+  {{range .Tags}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td>{{.SourceActor}}</td></tr>{{else}}<tr><td colspan="3" class="muted">none</td></tr>{{end}}
+</table>
+</div>
+{{end}}
+{{end}}

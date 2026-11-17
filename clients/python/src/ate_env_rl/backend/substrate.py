@@ -65,12 +65,14 @@ from ..telemetry.tracing import (
 from ..types import (
     DataPlaneEndpoint,
     EnvironmentSpec,
+    EnvironmentStatus,
     GoldenSnapshotState,
     PlacementDomain,
     PreflightCheck,
     RawSandboxInstance,
+    TeardownReport,
 )
-from .base import BackendDriver
+from .base import BackendDriver, record_reap_targets, settle_reap_targets
 
 logger = logging.getLogger("ate_env_rl.backend.substrate")
 
@@ -113,6 +115,14 @@ DEFAULT_BACKGROUND_DELETE_TIMEOUT_S = 10.0
 # starts a delete the join does not see, and the actor stays owned under
 # WARM_POOL_RUN_ID for a later reap.
 _CANCEL_SETTLE_YIELDS = 8
+
+# Environments a reap deletes at once, and a verify_teardown without
+# ListEnvironments reads at once.
+_REAP_CONCURRENCY = 16
+
+# Environments per ListEnvironments page of a verify_teardown: the most the
+# server reads from Substrate for one page.
+_VERIFY_PAGE_SIZE = 1000
 
 
 def _loop_running() -> bool:
@@ -293,6 +303,11 @@ class SubstrateBackendDriver(BackendDriver):
 
         self._lock = threading.Lock()
         self._owned_actors: dict[str, RawSandboxInstance] = {}
+        # run id -> the actors its reaps deleted or tried to delete, for
+        # verify_teardown (FL-18). Each reap of the run adds to it; a verify
+        # drops the ones it reads as gone. Kept for the last REAP_TARGET_RUNS
+        # runs.
+        self._reap_targets: dict[str, list[str]] = {}
         self._warm_paused_pool: _WarmPoolDict = _WarmPoolDict()
         # Bumped when a reap starts and when it ends, and when close() starts
         # (_count_teardown); _reaping counts the reaps in progress. A recycle,
@@ -1998,12 +2013,13 @@ class SubstrateBackendDriver(BackendDriver):
                 if inst.run_id == run_id or aid in warm_actors or inst.run_id == WARM_POOL_RUN_ID
             ]
             to_reap = list(dict.fromkeys(to_reap + warm_actors))
+            record_reap_targets(self._reap_targets, run_id, to_reap)
         # The pool is empty now; the gauge follows, so a direct reap (not
         # through a fleet, which also resets it) keeps the two equal (P-9).
         if warm_actors:
             self._observe("warm_remove", len(warm_actors))
 
-        sem = asyncio.Semaphore(16)
+        sem = asyncio.Semaphore(_REAP_CONCURRENCY)
         failed_actors: list[str] = []
         reaped_count = 0
         reap_lock = asyncio.Lock()
@@ -2139,6 +2155,65 @@ class SubstrateBackendDriver(BackendDriver):
 
     def reap(self, run_id: str) -> int:
         return self._sync(self.reap_async(run_id))
+
+    async def verify_teardown_async(self, run_id: str) -> TeardownReport:
+        """Report which actors that the reaps of run_id targeted still exist.
+
+        The targets are the actors this driver created and tracked for the
+        run when each reap started, warm-pool ones included (FL-18); nothing
+        else in the atespace is checked (FL-19). It pages ListEnvironments
+        over the atespace; against an ate-env-api without that RPC it reads
+        each target with GetEnvironment, where NotFound means gone. A target
+        the read finds gone is dropped. One that survives stays a target, so
+        the next verify checks it again. When the read raises, every target
+        stays.
+        """
+        with self._lock:
+            targets = list(self._reap_targets.get(run_id, []))
+        if not targets:
+            return TeardownReport(checked=0)
+        wanted = set(targets)
+        found: dict[str, EnvironmentStatus] = {}
+        try:
+            token = ""
+            while True:
+                page = await self.client.list_environments(
+                    atespace=self.atespace, page_size=_VERIFY_PAGE_SIZE, page_token=token
+                )
+                for info in page.environments:
+                    if info.id in wanted:
+                        found[info.id] = info.status
+                token = page.next_page_token
+                if not token:
+                    break
+        except RpcError as e:
+            if e.code != grpc.StatusCode.UNIMPLEMENTED:
+                raise
+            found.clear()
+            sem = asyncio.Semaphore(_REAP_CONCURRENCY)
+
+            async def _read(aid: str) -> None:
+                async with sem:
+                    try:
+                        info = await self._client_for(aid).get(aid, atespace=self.atespace)
+                    except NotFoundError:
+                        return
+                    found[aid] = info.status
+
+            results = await asyncio.gather(*[_read(aid) for aid in targets], return_exceptions=True)
+            for r in results:
+                if isinstance(r, BaseException):
+                    raise r
+        with self._lock:
+            settle_reap_targets(self._reap_targets, run_id, wanted - set(found))
+        surviving = tuple(aid for aid in targets if aid in found)
+        by_status: dict[EnvironmentStatus, int] = {}
+        for aid in surviving:
+            by_status[found[aid]] = by_status.get(found[aid], 0) + 1
+        return TeardownReport(checked=len(targets), surviving=surviving, by_status=by_status)
+
+    def verify_teardown(self, run_id: str) -> TeardownReport:
+        return self._sync(self.verify_teardown_async(run_id))
 
     def build_runtime(
         self, instance: RawSandboxInstance, data_plane: str = "ate_env"

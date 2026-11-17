@@ -20,7 +20,7 @@ imported, no exporter is created and no collector is registered.
 |---|---|---|
 | Python client and fleet | `FleetConfig(observability=ObservabilityConfig(enable_tracing=True))`, or `FleetConfig(tracing=TracerConfig(enable_tracing=True))`, or `Client(..., tracer_config=TracerConfig(enable_tracing=True))`; needs the `tracing` extra | `ObservabilityConfig(enable_metrics=None)` (the default: on when the `metrics` extra is installed, else one INFO message; `True` warns when the extra is missing) and `ate_env_rl.observability.serve_metrics(port, addr=...)` |
 | ate-env-api | `--enable-tracing` | `--metrics-listen-addr`, for example `:9090` (default empty: metrics off) |
-| `ate-env manifest` | `--enable-tracing`, `--otlp-endpoint`, `--otlp-insecure` | `--metrics-port` (adds a `metrics` container and Service port and `prometheus.io` scrape annotations) |
+| `ate-env manifest` | `--enable-tracing`, `--otlp-endpoint`, `--otlp-insecure` | `--metrics-port` (adds a `metrics` container and Service port and `prometheus.io` scrape annotations); with it, `--pod-monitoring` (a Managed Prometheus `PodMonitoring` that scrapes every 5 s) |
 | ate-env-guest | `--enable-tracing` in the ActorTemplate's guest arguments | `--enable-metrics` (serves `/metrics` on the guest listener, without authentication; reachable only inside the environment and through the atenet router, see [metrics.md](metrics.md)) |
 | Go client ([`clients/go`](../clients/go/README.md)) | `ClientOptions.TracerProvider` (any `trace.TracerProvider`; `env.NewTracerProvider(ctx, name)` is the OTLP default) and `ClientOptions.TraceServiceName` (default `ate-env-go-client`) | `ClientOptions.MetricsRegisterer` (any `prometheus.Registerer`, such as `prometheus.DefaultRegisterer` or `prometheus.NewRegistry()`; nil registers nothing) |
 | swebench-loader | `swebench-loader run -enable-tracing` | none (the JSONL events are its record) |
@@ -286,6 +286,53 @@ kubectl -n ate-env-telemetry cp -c files deploy/otel-collector:/data ./otel-data
 ```
 
 The fixture is for tests, not production: one replica, an `emptyDir`, no auth.
+
+### The fleet collector
+
+`ate-env manifest collector` prints the collector of the
+[fleet site plan](plans/sandbox-fleet-site/README.md), one per cluster, in
+namespace `ate-env-collector`. Its names differ from the fixture's above, so
+the two can run side by side. It receives OTLP traces on 4317 and 4318 and
+exports them to Cloud Trace in `--project`, through `telemetry.googleapis.com`,
+and as gzip OTLP/JSON files under `v1/traces/year=YYYY/month=MM/day=DD/` in
+`--bucket`, one file per batch of up to 30 s. It sets `gcp.project_id` to
+`--project` on every span, replacing a value the sender set. It runs on GKE as
+the Google service account that `--gcp-service-account` binds through Workload
+Identity. That account needs `roles/cloudtrace.agent` in `--project`, and on
+the bucket `roles/storage.objectCreator` and `storage.buckets.get` (for example
+`roles/storage.legacyBucketReader`): the exporter checks that the bucket exists
+before it starts. Enable `telemetry.googleapis.com` in `--project` and in the
+project of the Google service account; without it each Cloud Trace export fails
+with `SERVICE_DISABLED` and only the bucket gets the spans.
+
+```bash
+gcloud services enable telemetry.googleapis.com cloudtrace.googleapis.com --project "$CLUSTER_PROJECT"
+ate-env manifest collector --bucket "$BUCKET" --project "$CLUSTER_PROJECT" \
+  --gcp-service-account "ate-env-collector@$CENTRAL_PROJECT.iam.gserviceaccount.com" | kubectl apply -f -
+ate-env manifest --enable-tracing --otlp-endpoint http://ate-env-collector.ate-env-collector:4317 \
+  --otlp-insecure --metrics-port 9090 --pod-monitoring ... | kubectl apply -f -
+```
+
+`--pod-monitoring` has Managed Service for Prometheus scrape ate-env-api every
+5 s; the series then carry the `project_id`, `location`, `cluster` and
+`namespace` labels in Cloud Monitoring. The cluster needs Managed Prometheus,
+which Autopilot has on and a Standard cluster gets with
+`gcloud container clusters update --enable-managed-prometheus`. The pod keeps
+its `prometheus.io` annotations, so a cluster that also runs an
+annotation-based scraper scrapes the port twice.
+
+The pod template carries the SHA-256 of the collector's configuration
+(`ate-env.dev/config-sha256`): `kubectl apply` of a new `--project` or
+`--bucket` restarts the collector, which reads its configuration at start only.
+Upstream marks the traces signal of the `google_cloud_storage` exporter as
+`development` in 0.165.0; a later image can change it, so move `--image` only
+after the check below.
+
+To check the rendered configuration with the collector itself, set
+`OTELCOL_CONTRIB` to an `otelcol-contrib` 0.165.0 binary and run
+`go test ./cmd/ate-env -run TestManifestCollectorConfigValidates`. CI has no
+such binary and skips the test, so this check is manual: run it when the image
+or the configuration changes.
 
 ### Cloud Trace and GKE managed OpenTelemetry
 

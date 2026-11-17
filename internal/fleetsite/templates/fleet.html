@@ -1,0 +1,49 @@
+{{/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+{{define "content"}}
+<h1>Fleet</h1>
+<p class="totals">{{len .Rows}} clusters · {{.Deployments}} ate-env-api deployments · {{.Actors}} actors{{if .Stale}} · <span class="badge stale">{{.Stale}} stale</span>{{end}} · <a href="/api/v1/clusters">JSON</a></p>
+{{if not .Rows}}<p>The bucket has no snapshot yet. Each cluster's ate-env-reporter writes one under v1/inventory/.</p>{{end}}
+{{range .Rows}}
+<section class="cluster">
+  <h2><a href="{{clusterURL .Project .Cluster}}">{{.Project}} / {{.Cluster}}</a>{{with .Location}} <span class="muted">{{.}}</span>{{end}}
+    {{if .Stale}}<span class="badge stale">stale{{if .GeneratedAt}} {{age .Age}}{{end}}</span>{{else}}<span class="badge fresh">{{age .Age}} old</span>{{end}}</h2>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{else}}
+  <p class="muted">Snapshot {{timestamp (deref .GeneratedAt)}} by ate-env-reporter {{.Reporter.Version}} every {{.Reporter.IntervalSeconds}}s.</p>
+  <div class="bar" aria-label="actors by state">
+    <svg viewBox="0 0 100 4" preserveAspectRatio="none" role="img">
+      {{range .Bar}}<rect class="st-{{.State}}" x="{{.X}}" y="0" width="{{.Width}}" height="4"><title>{{.State}}: {{.Count}}</title></rect>{{end}}
+    </svg>
+  </div>
+  <p>{{.Total}} actors{{range .States}} · <span class="st-text st-{{.State}}">{{.State}} {{.Count}}</span>{{end}}</p>
+  <div class="cols">
+    <table>
+      <caption>ate-env-api deployments</caption>
+      <tr><th>Namespace</th><th>Version</th><th>Ready</th><th>Tracing</th><th>Metrics</th></tr>
+      {{range .Deployments}}<tr><td>{{.Namespace}}/{{.Name}}</td><td title="{{.Image}}">{{or .Version "?"}}</td><td>{{.Ready}}</td><td>{{if .Tracing}}on{{else}}off{{end}}</td><td>{{if .MetricsPort}}:{{.MetricsPort}}{{else}}off{{end}}</td></tr>
+      {{else}}<tr><td colspan="5" class="muted">none</td></tr>{{end}}
+    </table>
+    <table>
+      <caption>WorkerPools</caption>
+      <tr><th>Pool</th><th>Ready / desired</th><th>Sandbox</th></tr>
+      {{range .WorkerPools}}<tr><td>{{.Namespace}}/{{.Name}}</td><td{{if lt .ReadyReplicas .Replicas}} class="warn"{{end}}>{{.ReadyReplicas}} / {{.Replicas}}</td><td>{{.SandboxClass}}</td></tr>
+      {{else}}<tr><td colspan="3" class="muted">none</td></tr>{{end}}
+    </table>
+  </div>
+  {{end}}
+</section>
+{{end}}
+{{end}}

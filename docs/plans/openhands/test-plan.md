@@ -20,9 +20,9 @@ in [acceptance-criteria.md](./acceptance-criteria.md) when a criterion's status 
 ## 1. Cluster preparation
 
 1. A cluster that meets the [root README](../../../README.md#get-started): Substrate at the version
-   under test (`274605f1` for `main`), and ate-env-api's SPIFFE ID
-   (`spiffe://cluster.local/ns/ate-env/sa/ate-env-api`) in the router's ingress allow-list (#265).
-   Check the ate-env-api startup log: no rejected router certificate.
+   under test (v1.0.0 for `main`, which has the same runtime code as `274605f1`), and ate-env-api's
+   SPIFFE ID (`spiffe://cluster.local/ns/ate-env/sa/ate-env-api`) in the router's ingress allow-list
+   (#265). Check the ate-env-api startup log: no rejected router certificate.
 2. ate-env from the branch under test with the caller token required (`-auth-token-file`), images in
    `<registry>`, as in the root README.
 3. The layer, built into your own registry (D-5):

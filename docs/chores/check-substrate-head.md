@@ -8,17 +8,22 @@ Automated tools like Dependabot are configured in [`.github/dependabot.yml`](../
 
 ## Bump procedure
 
+`go.mod` currently tracks Agent Substrate's `release-1.0` branch (`v1.0.x` tags and `release-1.0` backports). Because `v1.0.0` was tagged on `release-1.0`, commits on `release-1.0` resolve to `v1.0.x` tags or `v1.0.1-0.<timestamp>-<sha>` pseudo-versions that sort above `v1.0.0` in Go module selection. Future `sandboxenv-rl` releases are not locked to `release-1.0` permanently and may advance to a newer release branch or `main` when upstream Substrate APIs require it. New Substrate API fields land on `main`; test them on demand with `make check-substrate-head ARGS=main` (until Substrate tags a release on or after `main`, `go list -m` resolves `main` commits below `v1.0.0`, so pinning a `main` commit steps `go.mod` down to a pre-`v1.0.0` pseudo-version).
+
 Follow these numbered steps to upgrade `go.ate.dev/substrate`:
 
-1. Preview compatibility against Substrate HEAD or a specific ref:
+1. Preview compatibility against `substrate@release-1.0` or a specific ref:
    ```bash
-   # Test against remote substrate@main
+   # Test against remote substrate@release-1.0 (default)
+   make check-substrate-head
+
+   # Preview against remote substrate@main (prints the version go list -m resolves)
    make check-substrate-head ARGS=main
 
    # Or test against a local substrate repository checkout
    make check-substrate-head ARGS=../substrate
    ```
-   [`hack/ci/check-substrate-head.sh`](../../hack/ci/check-substrate-head.sh) backs up [`go.mod`](../../go.mod), [`go.sum`](../../go.sum), and any active workspace files to a temporary directory, registers an `EXIT` trap guaranteeing they are restored even on failure or abort, initializes a temporary `go.work` for local checkout paths or updates `go.mod` via `go get` for remote refs, and runs `go build ./...`, `go vet ./...`, and `go test -race ./...`. For day-to-day multi-repo development against a local Substrate checkout, use `go work init . ../substrate` (see [Developing against a local Substrate checkout](../../README.md#developing-against-a-local-substrate-checkout); `go.work` and `go.work.sum` are gitignored).
+   [`hack/ci/check-substrate-head.sh`](../../hack/ci/check-substrate-head.sh) backs up [`go.mod`](../../go.mod), [`go.sum`](../../go.sum), and any active workspace files to a temporary directory, registers an `EXIT` trap guaranteeing they are restored even on failure or abort, initializes a temporary `go.work` for local checkout paths or updates `go.mod` via `go get` for remote refs (defaulting to `release-1.0`), and runs `go build ./...`, `go vet ./...`, and `go test -race ./...`. For day-to-day multi-repo development against a local Substrate checkout, use `go work init . ../substrate` (see [Developing against a local Substrate checkout](../../README.md#developing-against-a-local-substrate-checkout); `go.work` and `go.work.sum` are gitignored).
 
 2. Inspect Substrate release notes and git log for breaking changes:
    Review changes between the current pin and target version. Watch for:
@@ -27,9 +32,9 @@ Follow these numbered steps to upgrade `go.ate.dev/substrate`:
    - Ingress and networking authentication (e.g. v0.6.0 dropped plaintext HTTP router listeners, requiring TLS and client certificates authorized via `ATE_INGRESS_ALLOWED_SPIFFE_IDS`).
    - Resource limit units (e.g. converting Kubernetes quantity strings to integer millicores and bytes in `ResourceRequirements`).
 
-3. Bump the Go module dependency:
+3. Bump the Go module dependency (prefer a `v1.0.x` tag or `release-1.0` commit):
    ```bash
-   go get go.ate.dev/substrate@vX.Y.Z
+   go get go.ate.dev/substrate@release-1.0   # or go.ate.dev/substrate@v1.0.x once tagged
    go mod tidy
    ```
 

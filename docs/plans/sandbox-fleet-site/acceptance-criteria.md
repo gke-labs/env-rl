@@ -1,6 +1,6 @@
 # Acceptance criteria: sandbox fleet site
 
-Status: accepted (#223); last checked 2026-11-10 against `3dd8bab2`. Each criterion has a command
+Status: accepted (#223); last checked 2026-11-16 against `a12f48a0`. Each criterion has a command
 and an expected result. Evidence goes into `evidence/` in this directory, one file per acceptance
 pass, with the commit of each component.
 
@@ -36,7 +36,9 @@ pass, with the commit of each component.
   query `fleet.actor_events` for the actor uid; read `/api/v1/actors/<uid>/events`.
 - Expected: Logging path: median under 10 s, 99th percentile under 60 s over 100 transitions. OTLP
   path (phase 7): median under 5 s. The record's `state` and `operation` match the client's calls,
-  and `trace_id` equals the client span's trace id when tracing is on.
+  and `trace_id` equals the client span's trace id when tracing is on. The events query of one
+  request reports a `totalBytesProcessed` of the asked days' partitions, not the whole table (record
+  it from the job in the evidence).
 - Pass rule: the percentiles hold and no transition is missing against the client's log.
 
 ## FS-3: Read-only
@@ -93,7 +95,8 @@ pass, with the commit of each component.
 
 - Command: scale the reporter to zero; wait three intervals; open `/`.
 - Expected: the cluster shows a stale badge with the age of `generated_at`; the API returns
-  `"stale": true`; scaling back clears it within one interval.
+  `"stale": true`; scaling back clears it within one interval plus the 30 s cache period, or at once
+  with `?nocache=1`.
 - Pass rule: holds.
 
 ## FS-10: Schema and secrets

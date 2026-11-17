@@ -1,10 +1,12 @@
 # Sandbox fleet site: design
 
-Status: accepted plan (#223); pull request 1, `internal/inventory`, merged as #226. Last checked
-2026-11-10 against `ai-on-gke/sandboxenv-rl` at `3dd8bab2` and the Substrate `go.mod` requires,
-`274605f1`; the audit is in [research.md](./research.md), which first read `3b03b03` and `28520c0d`
-on 2026-10-30. The decisions taken so far are in [decisions.md](./decisions.md). Companions:
-[prd.md](./prd.md), [execution-plan.md](./execution-plan.md), [interfaces.md](./interfaces.md),
+Status: accepted plan (#223); pull requests 1, 2 and 2b (`internal/inventory`, the reporter and its
+manifest) merged as #226, #348 and #349; pull requests 3 and 4, the telemetry manifests and the site
+with the Fleet and Cluster pages, merged as #415 and #416. Last checked 2026-11-16 against
+`ai-on-gke/sandboxenv-rl` at `a12f48a0` and the Substrate `go.mod` requires, `274605f1`; the audit
+is in [research.md](./research.md), which first read `3b03b03` and `28520c0d` on 2026-10-30. The
+decisions taken so far are in [decisions.md](./decisions.md). Companions: [prd.md](./prd.md),
+[execution-plan.md](./execution-plan.md), [interfaces.md](./interfaces.md),
 [acceptance-criteria.md](./acceptance-criteria.md) and, for the order of operations with `gcloud`,
 [quickstart.md](./quickstart.md).
 
@@ -52,12 +54,13 @@ project owns.
 
 Per cluster, applied by `ate-env manifest` or the fleet's Config Sync repository:
 
-- Telemetry collector: the acceptance fixture `tests/telemetry/otel-collector.yaml` hardened into a
-  deployment with three exporters: Cloud Trace (`otlphttp` to `telemetry.googleapis.com`),
-  `google_cloud_storage` for raw spans, and `googlecloudpubsub` for actor events once Substrate
-  emits them over OTLP. One replica per cluster is enough for the ate-env side; Substrate's own
-  components keep the managed collector for traces and metrics; in phase 2 only `ate-api-server`'s
-  logs go to this collector, through `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`.
+- Telemetry collector: `ate-env manifest collector`, the acceptance fixture
+  `tests/telemetry/otel-collector.yaml` hardened into a deployment with two exporters: Cloud Trace
+  (`otlp_http` to `telemetry.googleapis.com`) and `google_cloud_storage` for raw spans. Phase 7 adds
+  `googlecloudpubsub` for actor events once Substrate emits them over OTLP. One replica per cluster
+  is enough for the ate-env side; Substrate's own components keep the managed collector for traces
+  and metrics; in phase 2 only `ate-api-server`'s logs go to this collector, through
+  `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`.
 - Reporter: `cmd/ate-env-reporter`, a single-replica Deployment in its own namespace labeled
   `ate.dev/api-access=true`, reusing `internal/ate` to dial `ateapi`. It rewrites `latest.json`
   every interval and adds an hourly snapshot. Workload Identity to a service account with
@@ -67,7 +70,8 @@ Per cluster, applied by `ate-env manifest` or the fleet's Config Sync repository
   binding `ate-env manifest access-policy --global` already renders for `ate-env-api`'s
   `ListPlacementDomains` (#235), because the global policy is one object; a ClusterRole with `list`
   on WorkerPools and Deployments, the two kinds the reporter reads.
-- PodMonitoring for `ate-env-api`'s metrics port, rendered by `ate-env manifest --metrics-port`.
+- PodMonitoring for `ate-env-api`'s metrics port, rendered by
+  `ate-env manifest --metrics-port <port> --pod-monitoring`.
 - Substrate configuration: `OTEL_LOGS_EXPORTER=otlp,console` and `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`
   on the `ate-api-server` Deployment (phase 2; not in the shared `ate-otel-config`, because the
   managed collector does not export logs to Pub/Sub and atelet refuses per-signal endpoints that
@@ -112,8 +116,8 @@ intervals, which doubles as reporter health.
 
 - Read-only is enforced by IAM rather than by code: the site's service account has viewer roles
   only, the reporter's has `storage.objectUser` under an IAM condition on its own two prefixes of
-  one bucket and `viewer` in Substrate, the collector's has `pubsub.publisher`,
-  `storage.objectCreator` and `cloudtrace.agent`.
+  one bucket and `viewer` in Substrate, the collector's has `pubsub.publisher` (phase 7),
+  `storage.objectCreator` with `storage.buckets.get` on the bucket, and `cloudtrace.agent`.
 - A compromised reporter can overwrite or delete only its own cluster's `latest.json` and hourly
   snapshots. The event archive under `v1/events/` and the BigQuery table are written by Pub/Sub,
   outside every reporter's prefixes, and keep the transition history.
@@ -129,8 +133,9 @@ Run this before each pull request of the plan and when `main` moves; record the 
 section of [research.md](./research.md) and update the last-checked line above (FS-13).
 
 1. RPCs and fields: `grep -E '^\s*rpc ' proto/ateenv/v1alpha/env.proto` and the `Environment`
-   message. The plan assumes no RPC enumerates environments; a list or watch call changes the
-   reporter.
+   message. `ListEnvironments` (#392) reads one page of one atespace per call through `ate-env-api`,
+   and the reporter lists every atespace at once through `ateapi`. A call that lists across
+   atespaces, or a watch call, changes the reporter.
 2. Substrate, at the version `go.mod` requires: `ListActors` with an empty atespace lists across
    atespaces and pages at 1000; `Control` has no `Batch*` or `stream` RPC; the actor event names in
    `internal/actorevent` are `ate.actor.state_changed`, `ate.actor.crashed` and
@@ -145,7 +150,8 @@ section of [research.md](./research.md) and update the last-checked line above (
    counter gains `_total`, so the entries to find are `ate.workerpool.workers` and
    `ate.actor.crashes`.
 5. Manifest: `ate-env manifest` still has `access-policy --global`, `--metrics-port`,
-   `--enable-tracing`, `--otlp-endpoint` and `--otlp-insecure`.
+   `--pod-monitoring`, `--enable-tracing`, `--otlp-endpoint`, `--otlp-insecure`, `reporter` and
+   `collector`.
 6. Benchmark bundles: `cmd/benchmarking/bench/bundle.go` still names the folder form and the
    required files the Runs page reads.
 7. Conventions: criterion ids stay unique across `docs/plans/` (`FS-` here).

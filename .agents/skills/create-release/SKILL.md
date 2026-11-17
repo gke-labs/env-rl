@@ -133,7 +133,9 @@ This command:
        removing the HTML comments.
    - **Server & Runtime Dependencies**: Copy the pre-rendered `$SERVER_DEPENDENCIES` table from
      `release-context.md` verbatim so cluster operators have the exact `go.ate.dev/substrate`
-     revision and server build pins.
+     revision and server build pins, and keep the **Substrate Version Tracking** note beneath the
+     table accurate to the branch/revision policy of the release (noting that later releases may
+     advance beyond `release-1.0` if upstream changes require it).
    - **Contributors**: List all contributor `@handles`.
 3. Validate with a dry run:
 

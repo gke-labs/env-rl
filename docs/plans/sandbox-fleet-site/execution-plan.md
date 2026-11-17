@@ -1,7 +1,7 @@
 # Execution plan: sandbox fleet site
 
-Status: accepted (#223); pull request 1 merged (#226); pull requests 2 and 2b are the reporter
-binary and its manifest. Last checked 2026-11-10 against `3dd8bab2`. Design:
+Status: accepted (#223); pull requests 1, 2, 2b, 3 and 4 merged (#226, #348, #349, #415, #416); pull
+requests 2c, 5, 6 and 7 are not started. Last checked 2026-11-16 against `a12f48a0`. Design:
 [README.md](./README.md). Contracts: [interfaces.md](./interfaces.md). Done when every criterion in
 [acceptance-criteria.md](./acceptance-criteria.md) passes on two clusters in two projects and the
 pull requests below are merged.
@@ -10,10 +10,11 @@ pull requests below are merged.
 
 - `ai-on-gke/sandboxenv-rl`: the reporter (`cmd/ate-env-reporter`), the snapshot schema
   (`internal/inventory`), the site (`cmd/ate-env-fleet-site`), the collector and PodMonitoring
-  manifests (`manifests/telemetry/`), the Terraform for the central project (`deploy/fleet-site/`),
-  and `docs/fleet-site.md`. The reporter reuses `internal/ate`; the site reuses the schema package.
-  A separate repository is the alternative if the maintainers want the public repo to stay code that
-  runs in the cluster only; recorded in [decisions.md](./decisions.md).
+  manifests (`ate-env manifest collector` and `--pod-monitoring`, in `cmd/ate-env`), the Terraform
+  for the central project (`deploy/fleet-site/`), and `docs/fleet-site.md`. The reporter reuses
+  `internal/ate`; the site reuses the schema package. A separate repository is the alternative if
+  the maintainers want the public repo to stay code that runs in the cluster only; recorded in
+  [decisions.md](./decisions.md).
 - `agent-substrate/substrate`: no code. Configuration per cluster (`ate-otel-config`) and one
   AccessPolicy.
 - This directory: the plan, the decisions, the acceptance evidence.
@@ -42,7 +43,8 @@ Phases 2, 3 and 4 run in parallel after phase 1.
 | 1   | `internal/inventory`: the snapshot schema, JSON tags, a golden file                                                                                                                                                                                                                     | small  |
 | 2   | `cmd/ate-env-reporter` and `internal/reporter`: poll loop, atomic writes, health endpoint, `-bucket` and `-out-dir`, tests against `fakecontrol` extended with `ListAtespaces`, `ListActorTemplates` and `ListTags`, schema additions `workers[].labels` and `actors[].worker_selector` | medium |
 | 2b  | `ate-env manifest reporter` (ServiceAccount, ClusterRole, Deployment, the global `viewer` binding to merge) and the Kind end-to-end step (FS-14)                                                                                                                                        | small  |
-| 3   | `manifests/telemetry/`: collector deployment and `PodMonitoring`; `ate-env manifest --pod-monitoring`                                                                                                                                                                                   | small  |
+| 2c  | The reporter's `-enable-tracing` and `-metrics-listen-addr`, `ate_env_reporter_poll_duration_seconds{status}` with its section in `docs/metrics.md`, and a `PodMonitoring` for the reporter                                                                                             | small  |
+| 3   | `ate-env manifest collector` (collector Deployment, traces to Cloud Trace and the bucket) and `ate-env manifest --pod-monitoring`                                                                                                                                                       | small  |
 | 4   | `cmd/ate-env-fleet-site`: HTTP server, IAP verification, GCS and BigQuery readers, Fleet and Cluster pages, JSON API                                                                                                                                                                    | large  |
 | 5   | Actor and Live pages, PromQL proxy, Runs page (the Cloud Trace link of a trainer run comes from the trace ids in its `spans.jsonl`; FS-11 lists how a run folder is produced with `RunReport.write`, `build_report.py` and one copy, so no trainer-side code is in scope)               | medium |
 | 6   | `deploy/fleet-site/` Terraform and `docs/fleet-site.md`; a shell check that a two-bucket `BENCH_BUCKET` yields one `roles/storage.objectViewer` grant per bucket and one comma-separated `FLEET_BENCH_BUCKETS`                                                                          | medium |

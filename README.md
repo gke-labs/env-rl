@@ -43,7 +43,8 @@ storage (`gs://`) to skip a cold boot.
 - **Framework integrations** ([integrations](./integrations/README.md)): Drop-in providers integrate
   with [NeMo Gym](./integrations/nemo-gym/README.md),
   [uni-agent](./integrations/uni-agent/README.md),
-  [OpenHands](./integrations/openhands/README.md), and
+  [OpenHands](./integrations/openhands/README.md),
+  [E2B](./integrations/e2b/README.md), and
   [Harbor](./integrations/harbor/README.md) with no changes to those frameworks.
 - **Benchmarking and placement** ([benchmarking/swebench](./benchmarking/swebench/README.md),
   [bench harness](./cmd/benchmarking/bench/README.md)): `swebench-loader` runs SWE-bench Verified
@@ -111,7 +112,7 @@ Request-path zoom:
 | [`benchmarking/`](./benchmarking/README.md) | The SWE-bench loader scripts, the `bench` scenarios, the telemetry report tool and the benchmarking skills. |
 | [`internal/`](./internal) | The packages the binaries are built from: `apiservice` (the gRPC server), `ate` (the Substrate client), `inventory` (fleet inventory snapshot schema), `reporter` (the snapshot writer), `mcp`, `portproxy`, `routertls`, `hostcheck`, `sidecarenv`, `telemetry`, `tool`, `unknownfields`, `benchmarking/*`, and the test doubles and helpers in `internaltest` (`fakecontrol`, `fakerouter`, `synctestrapid`, `testcerts`). |
 | [`proto/ateenv/v1alpha`](./proto/ateenv/v1alpha) | The `ateenv.v1alpha` API: `env.proto` (`EnvironmentService`) and `guest.proto` (`ProcessService`, `FileSystemService`), with the generated Go stubs. |
-| [`proto/testdata/client-parity`](./proto/testdata/client-parity) | Shared Go and Python client conformance vectors (errors, executable names, image refs, metric families, RPC attributes, RPC coverage, semconv). |
+| [`proto/testdata/client-parity`](./proto/testdata/client-parity) | Shared Go and Python client conformance vectors (errors, executable names, image refs, metric families, RPC attributes, RPC coverage, semconv, spans). |
 | [`docs/`](./docs) | [Architecture](./docs/architecture.md), [glossary](./docs/glossary.md), [observability](./docs/observability.md), the [metrics reference](./docs/metrics.md), [rootfs images and runtime layers](./docs/rootfs-images/README.md), the [threat model](./docs/security/threat-model.md), [support](./docs/support.md), [releases](./docs/release.md), the developer guides in [`docs/dev`](./docs/dev), the maintenance chores in [`docs/chores`](./docs/chores), and the plans in [`docs/plans`](./docs/plans). |
 | [`hack/`](./hack) | Repository scripts, checks and generators: the CI runners in [`hack/ci`](./hack/ci) (the Kind e2e run, the smoke test, pin and Substrate head checks), release automation in [`hack/release`](./hack/release), license boilerplate, [`hack/verify`](./hack/verify) and `metrics-docs` (renders `docs/metrics.md`). |
 | [`nix/`](./nix), [`flake.nix`](./flake.nix), [`uv.lock`](./uv.lock) | The Nix flake: the `devShell`s, the Python environments built from `uv.lock` (`python.nix`), and the CI scripts `ci-go`, `ci-python`, `ci-e2e` and `ci-release` (`ci.nix`). |
@@ -131,6 +132,8 @@ it.
 |---|---|
 | [`examples/grpo`](./examples/grpo/README.md) | A real RL loop: TRL's GRPOTrainer trains Qwen2.5-0.5B on MBPP, and each completion runs in an environment that computes the reward. Covers the park/wake pattern, with the fleet suspended after each step. CPU only. |
 | [`examples/e2b-envd-layer`](./examples/e2b-envd-layer/README.md) | An E2B-compatible sandbox from any image: envd as an added runtime layer, and an E2B SDK program on it. |
+| [`examples/env-lifecycle`](./examples/env-lifecycle/README.md) | Go: the `EnvironmentService` lifecycle (create, get, suspend, delete) with the generated gRPC stubs alone. |
+| [`examples/python-quickstart`](./examples/python-quickstart/README.md) | Python: the `ate_env_rl` client end to end (create, shell, file read/write, process follow and signal, delete). |
 | [`examples/runtime-layers`](./examples/runtime-layers/README.md) | An unmodified rootfs image with a second runtime injected as a layer and supervised as a sidecar. |
 | [`examples/harbor`](./examples/harbor/README.md) | Terminal-Bench 2.0 on ate-env through the Harbor provider: prebuilt images, resource class templates, `run-tb2.sh` around `harbor run`, and the comparison with Docker. |
 | [`examples/harbor-tools-layer`](./examples/harbor-tools-layer/README.md) | Harbor with tools as a second layer: a static tmux and asciinema layer mounted into every task image, the class templates registered with `--layer`, and `harbor run` with the layer first on `PATH`, thus terminus-2 installs nothing. |
@@ -182,7 +185,8 @@ supported means for each path.
 ## Get started
 
 You need a cluster with Agent Substrate at or after
-[`48f5744c`](https://github.com/agent-substrate/substrate/commit/48f5744c) (with
+[`48f5744c`](https://github.com/agent-substrate/substrate/commit/48f5744c) (2026-10-22; CI tests
+[`v1.0.0`](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0), with
 `spiffe://cluster.local/ns/ate-env/sa/ate-env-api` in `--ingress-allowed-spiffe-ids`), a snapshots
 bucket, `kubectl` with `kubectl-ate`, Go (`1.27` or later), [ko](https://ko.build), and Python
 `3.10` or later for the SDK. The latest
@@ -245,13 +249,19 @@ Then pick an [example](#examples) or an [integration](#integrations).
 
 Prerequisites: a cluster with [Agent Substrate](https://github.com/agent-substrate/substrate)
 installed, with its cluster snapshot location (`ate-setup --snapshot-location`). ate-env is built
-against Substrate [`274605f1`](https://github.com/agent-substrate/substrate/commit/274605f1)
-(2026-11-05, Go module `go.ate.dev/substrate`), and the cluster must run Substrate at or after
-[`48f5744c`](https://github.com/agent-substrate/substrate/commit/48f5744c) (2026-10-22): that commit
-moved the Kubernetes CRDs (`WorkerPool`, `SandboxConfig`) from `ate.dev/v1alpha1` to `ate.dev/v1`
-and the control-plane gRPC service from `/ateapi.Control` to `/substrate.ateapi.v1.Control`.
-Upgrade the control plane, CRDs, and the ate-env images together; with an older
-Substrate (`v0.6.0`), use ate-env from before this bump. The WorkerPool alone chooses the sandbox
+against and tested in CI on Substrate
+[`v1.0.0`](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0)
+([`b34fbee7`](https://github.com/agent-substrate/substrate/commit/b34fbee742906494b5eb4f1f36987176bf8770a4),
+2026-11-05, Go module `go.ate.dev/substrate`, currently tracking `release-1.0`; we do not promise
+to always track stable Substrate versions, so cross-check each sandboxenv-rl release's notes).
+Deployed clusters running Substrate at or after
+[`48f5744c`](https://github.com/agent-substrate/substrate/commit/48f5744c) (2026-10-22) are
+supported: that commit moved the Kubernetes CRDs (`WorkerPool`, `SandboxConfig`) from
+`ate.dev/v1alpha1` to `ate.dev/v1` and the control-plane gRPC service from `/ateapi.Control` to
+`/substrate.ateapi.v1.Control`. When upgrading a cluster from pre-`274605f1` Substrate to `v1.0.0`,
+recreate pre-upgrade gVisor snapshots and register templates without `--snapshots-bucket` unless
+`PerTemplateSnapshotLocation` is enabled. With an older Substrate (`v0.6.0`), use ate-env from
+before `#163`. The WorkerPool alone chooses the sandbox
 (`spec.sandboxClasses`) and the ActorTemplate names none. Because the template no
 longer names a class, an actor booting without a snapshot can land on any pool whose labels its
 template's `workerSelector` matches, and on any pool at all without a selector. `ate-env` labels its
@@ -460,7 +470,7 @@ environment instead of scoring it:
 `--wake-no-capacity-grace` defaults to 0: a full fleet keeps waiting for the whole `--wake-budget`,
 since capacity can come back as nodes scale up or other environments stop. The Python SDK turns
 both into a retryable `SandboxStartError` whose `reason` is the trailer's value. Port-proxy requests
-wait on the router instead (see
+wait on the router unless `X-Env-Wake-Wait` asks the proxy to wait instead (see
 [Reaching a service inside an environment](#reaching-a-service-inside-an-environment)).
 
 `ate-env-api` can export traces and serve Prometheus metrics; both are off by default:
@@ -658,6 +668,32 @@ the whole control plane, so first read it with `kubectl ate get access-policy --
 
 The Deployment turns ready when the first snapshot is written.
 
+### 4. Optional: the fleet telemetry collector
+
+`ate-env manifest collector` prints one OpenTelemetry collector per cluster, which sends the traces
+of `ate-env-api` and the trainers to Cloud Trace and as files under `v1/traces/` in a bucket.
+`--pod-monitoring` adds a Managed Prometheus `PodMonitoring` that scrapes `ate-env-api` every 5 s.
+See [docs/observability.md](docs/observability.md#the-fleet-collector) for the roles the Google
+service account needs and the APIs to enable.
+
+```bash
+ate-env manifest collector --bucket <bucket> --project <project> \
+  --gcp-service-account ate-env-collector@<central-project>.iam.gserviceaccount.com | kubectl apply -f -
+ate-env manifest --enable-tracing --otlp-endpoint http://ate-env-collector.ate-env-collector:4317 \
+  --otlp-insecure --metrics-port 9090 --pod-monitoring ... | kubectl apply -f -
+```
+
+### 5. Optional: the fleet site
+
+`ate-env-fleet-site` is one read-only website for every cluster, on Cloud Run behind
+Identity-Aware Proxy. It reads the reporters' snapshots from the bucket and the actor events from
+BigQuery; [the plan's quickstart](docs/plans/sandbox-fleet-site/quickstart.md) has the deployment.
+To look at the snapshots of a reporter run with `--out-dir` on your machine:
+
+```bash
+go run ./cmd/ate-env-fleet-site -dir /tmp/snap -insecure-no-iap -listen 127.0.0.1:8080
+```
+
 ## CLI
 
 File operations and remote command execution take the environment ID first, followed by the operation:
@@ -730,6 +766,7 @@ Usage:
 Available Commands:
   access-policy Generate the Substrate access policy that lets ate-env-api manage environments
   auth-secret   Generate the Secret with the bearer token ate-env-api requires from callers
+  collector     Generate the manifests of the fleet telemetry collector
   reporter      Generate the manifests of ate-env-reporter, the fleet inventory reporter
   template      Generate Substrate ActorTemplate manifest
 
@@ -750,6 +787,7 @@ Flags:
       --namespace string                     Kubernetes namespace to deploy into (default "ate-env")
       --otlp-endpoint string                 OTLP/gRPC collector endpoint for ate-env-api's traces, set as OTEL_EXPORTER_OTLP_ENDPOINT, e.g. http://otel-collector.observability:4317
       --otlp-insecure                        set OTEL_EXPORTER_OTLP_INSECURE=true: talk to the collector in plaintext
+      --pod-monitoring                       add a PodMonitoring (monitoring.googleapis.com/v1) that has Google Cloud Managed Service for Prometheus scrape the metrics port every 5s; needs --metrics-port and Managed Prometheus on the cluster. The pod keeps its prometheus.io annotations, so a cluster that also runs an annotation-based scraper scrapes the port twice
       --port-proxy-atespaces string          comma-separated atespaces whose environments ate-env-api's port proxy forwards to, or * for any (defaults to ate-env)
       --port-proxy-host-suffix string        domain of two labels or more that turns on the hostname form of ate-env-api's port proxy: <port>-<id>.<domain> and <port>-<id>.<atespace>.<domain> reach an environment port; the manifest renders no Ingress, DNS record or certificate for it (off when empty)
       --replicas int32                       number of pre-warmed worker pods (default 5)
@@ -1109,7 +1147,8 @@ KEEP_CLUSTER=1 make ci-e2e
 # Fast iteration: reuse an existing cluster without re-creating or deleting it
 REUSE_CLUSTER=sbx-e2e-abc123 make ci-e2e
 
-# Verify compatibility against substrate@HEAD (or custom git ref / local path)
+# Verify compatibility against substrate@release-1.0 (or custom git ref / local path)
+make check-substrate-head
 make check-substrate-head ARGS=main
 make check-substrate-head ARGS=../substrate
 

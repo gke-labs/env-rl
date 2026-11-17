@@ -14,13 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Verifies sandboxenv-rl build, vet, and race tests against substrate@HEAD or a custom ref/dir.
+# Verifies sandboxenv-rl build, vet, and race tests against substrate@release-1.0 or a custom ref/dir.
 #
 # What it does:
 #   1. Backs up go.mod, go.sum, and any active go.work to a temporary directory.
 #   2. Installs an EXIT trap ensuring original module and workspace files are restored on exit.
 #   3. For local directories: initializes a temporary go.work pointing to the local checkout.
-#   4. For remote references: updates go.mod via `go get go.ate.dev/substrate@<ref>` (with GOWORK=off).
+#   4. For remote references: updates go.mod via `go get go.ate.dev/substrate@<ref>` (with GOWORK=off),
+#      defaulting to `release-1.0` to match the v1.0.x release branch tracked in go.mod.
 #   5. Executes `go build ./...`, `go vet ./...`, and `go test -race ./...`.
 #   6. Restores original go.mod, go.sum, and workspace state cleanly.
 #
@@ -29,11 +30,12 @@
 #   and flake app `nix run .#check-substrate-head`.
 #
 # How to run:
-#   - `make check-substrate-head` (preferred; auto-selects Nix or Docker)
+#   - `make check-substrate-head` (preferred; auto-selects Nix or Docker, defaults to release-1.0)
 #   - `nix run .#check-substrate-head -- [args]`
 #   - Direct: `./hack/ci/check-substrate-head.sh [PATH_OR_REF]`
 #   Examples:
 #     make check-substrate-head
+#     make check-substrate-head ARGS=release-1.0
 #     make check-substrate-head ARGS=main
 #     make check-substrate-head ARGS=../substrate
 #     ./hack/ci/check-substrate-head.sh /path/to/substrate
@@ -59,10 +61,14 @@
 
 set -euo pipefail
 
+# Currently tracks Agent Substrate's release-1.0 branch (v1.0.x tags and backports);
+# future sandboxenv-rl releases are not locked to release-1.0 and may move ahead if needed.
+DEFAULT_SUBSTRATE_REF="release-1.0"
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: $0 [PATH_OR_REF]"
-  echo "Verifies sandboxenv-rl compatibility against substrate@HEAD (or specified path/ref)."
-  echo "Defaults to checking remote go.ate.dev/substrate@main."
+  echo "Verifies sandboxenv-rl compatibility against substrate@${DEFAULT_SUBSTRATE_REF} (or specified path/ref)."
+  echo "Defaults to checking remote go.ate.dev/substrate@${DEFAULT_SUBSTRATE_REF}."
   exit 0
 fi
 
@@ -115,11 +121,17 @@ if [[ -n "${SUBSTRATE_TARGET}" && -d "${SUBSTRATE_TARGET}" ]]; then
   rm -f go.work go.work.sum
   go work init . "${TARGET_PATH}"
 else
-  TARGET_REF="${SUBSTRATE_TARGET:-main}"
+  TARGET_REF="${SUBSTRATE_TARGET:-${DEFAULT_SUBSTRATE_REF}}"
+  PINNED_VERSION="$(GOWORK=off go list -m -f '{{.Version}}' go.ate.dev/substrate)"
   echo "==> Checking against remote substrate@${TARGET_REF}..."
   # Disable workspace mode so go get updates go.mod directly
   export GOWORK=off
   go get "go.ate.dev/substrate@${TARGET_REF}"
+  RESOLVED_VERSION="$(go list -m -f '{{.Version}}' go.ate.dev/substrate)"
+  echo "==> Resolved go.ate.dev/substrate@${TARGET_REF} to ${RESOLVED_VERSION} (go.mod pin: ${PINNED_VERSION})"
+  if [[ "${TARGET_REF}" != "${DEFAULT_SUBSTRATE_REF}" ]]; then
+    echo "NOTE: go.mod tracks ${DEFAULT_SUBSTRATE_REF} (pinned at ${PINNED_VERSION}); substrate@${TARGET_REF} resolved to ${RESOLVED_VERSION}." >&2
+  fi
 fi
 
 echo "==> Running go build..."
@@ -131,4 +143,4 @@ go vet ./...
 echo "==> Running go test (-race)..."
 go test -race ./...
 
-echo "==> Substrate HEAD compatibility check passed!"
+echo "==> Substrate compatibility check passed!"

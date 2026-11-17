@@ -131,3 +131,98 @@ Append-only. Each entry: date, who, what, why.
   shell, so its files are not read. On the host, with `-out-dir` and a token of the same
   ServiceAccount, where `TestE2ESnapshotDir` decodes the files and compares the counts. The
   manifest's Deployment uses the `Recreate` strategy: `latest.json` has one writer.
+- 2026-11-16, orchestrator: drift check against `main` at `66b0e526` (research.md, "Audit of main,
+  2026-11-16"). The seven steps hold; open #392 (`ListEnvironments`) does not change the reporter.
+- 2026-11-16, orchestrator, pull request 3: the collector is `ate-env manifest collector`, not a
+  static `manifests/telemetry/collector.yaml`. The bucket and the project are inputs, the reporter's
+  manifest is rendered the same way, a test checks the rendered pipeline, and a new top-level
+  directory would need an entry in `hack/verify/layers.py`. The namespace and the names are
+  `ate-env-collector`, not the fixture's `ate-env-telemetry` and `otel-collector`: an apply over the
+  fixture would replace its ConfigMap and Deployment and drop its `files` container. The endpoint is
+  `http://ate-env-collector.ate-env-collector:4317`.
+- 2026-11-16, orchestrator, pull request 3: the collector renders two traces pipelines from one OTLP
+  receiver, one per exporter, because the bucket's batch waits up to 30 s to make fewer objects and
+  Cloud Trace keeps the default batch. Both set `gcp.project_id` with `upsert`, so a sender cannot
+  direct spans into another cluster's project with the collector's identity, which holds
+  `roles/cloudtrace.agent` in every cluster project. The collector renders traces only. The metrics
+  pipeline is left out, because `--pod-monitoring` covers `ate-env-api`, and the logs pipeline comes
+  with phase 7, when Substrate sends its records over OTLP. The image is
+  `otel/opentelemetry-collector-contrib` 0.165.0 pinned by digest: the `google_cloud_storage`
+  exporter takes traces and a partition from 0.145.0, and 0.165.0 renames the components the
+  configuration uses (`google_client_auth`, `otlp_http`, `google_cloud_storage`).
+- 2026-11-16, orchestrator, pull request 3: the collector's Google service account needs
+  `storage.buckets.get` on the bucket next to `roles/storage.objectCreator`, because the exporter
+  with `reuse_if_exists: true` reads the bucket's attributes at start and fails without them. The
+  quickstart grants `roles/storage.legacyBucketReader`, which adds `storage.objects.list`; the
+  Terraform of pull request 6 can use a custom role with `storage.buckets.get` alone. The span
+  objects are `v1/traces/year=YYYY/month=MM/day=DD/spans_<uuid>.gz`, one export request each.
+  `telemetry.googleapis.com` must be enabled in the cluster project and in the project of the
+  collector's Google service account; the quickstart and `docs/observability.md` say so.
+- 2026-11-16, orchestrator, pull request 3: the reporter's `-enable-tracing` and
+  `-metrics-listen-addr` (2026-11-10) are not in pull request 3, which stays the manifests. They are
+  a pull request of their own, with the reporter's section in `docs/metrics.md` and a
+  `PodMonitoring` for the reporter.
+- 2026-11-16, orchestrator, from the review of #415: the collector's pod template carries the
+  SHA-256 of its configuration as `ate-env.dev/config-sha256`, so `kubectl apply` of a new
+  `--project` or `--bucket` restarts it. The check that loads the rendered configuration in the real
+  collector (`TestManifestCollectorConfigValidates`) is manual: CI has no `otelcol-contrib` binary.
+  Drift check after the rebase onto `9fed77fc`: #392 adds `ListEnvironments`, which does not change
+  the reporter (research.md).
+- 2026-11-16, orchestrator, pull request 4: the site is `cmd/ate-env-fleet-site` over
+  `internal/fleetsite`. It verifies the IAP assertion with `google.golang.org/api/idtoken` and
+  queries BigQuery with `google.golang.org/api/bigquery/v2`; both are in `google.golang.org/api`,
+  already in the module graph, so no module is added. It pins `ES256` before `idtoken` sees the
+  token, because `idtoken` also accepts `RS256` ID tokens that any Google service account can mint
+  for any audience, and checks the issuer, which `idtoken` does not.
+- 2026-11-16, orchestrator, pull request 4: `GET /api/v1/clusters/{project}/{cluster}` returns the
+  snapshot inside an envelope with `generation`, `age_s` and `stale`, not the bare snapshot. FS-9
+  asks the API for `"stale": true`, and a field added to the snapshot itself would fail
+  `DecodeSnapshot`, which refuses unknown fields.
+- 2026-11-16, orchestrator, pull request 4: `FLEET_EVENTS_TABLE` names the view `actor_events_v`,
+  which the site queries, and `FLEET_IAP_AUDIENCE` is a new variable for the assertion's audience.
+  `-dir` reads a reporter's `-out-dir` output and `-insecure-no-iap` serves it without IAP on a
+  loopback address only, so the pages can be checked without a deployment.
+- 2026-11-16, orchestrator, pull request 4: the pages have no script, so the policy is
+  `default-src 'none'` with the stylesheet from the site; the Live page of pull request 5 decides
+  whether it needs a script and its nonce. The site serves `GET` and `HEAD` only and limits each
+  user to 10 requests a second per instance, because each events request is a BigQuery job.
+- 2026-11-16, orchestrator, from the review of pull request 4: `fleet.actor_events` is partitioned
+  by `publish_time` (day). The view takes every other column from the JSON `data` column, so only
+  `publish_time` can prune; without the partition each events request would bill the whole table and
+  fail once the table passed the 10 GiB cap. FS-2 records the bytes one query processed.
+- 2026-11-16, orchestrator, same review: the site's Cloud Run service gets `--memory 2Gi` and
+  `--concurrency 20`. A 100,000-actor snapshot measured about 600 MB resident once decoded and 1.5
+  GB at peak with four concurrent downloads; the API writes compact JSON. A refresh runs on its own
+  context with a 20 s timeout, requests get the last listing while it runs, and a snapshot whose
+  read failed is read again, so one storage error or a closed tab does not stick to a generation. A
+  `generated_at` more than a minute ahead of the site's clock counts as stale.
+- 2026-11-16, orchestrator, from the second review of pull request 4: a request gets the last
+  listing during a refresh only while it is younger than two cache periods, so the first view after
+  an idle night waits for a fresh one instead of showing every cluster stale; `?nocache=1` waits for
+  a refresh that started after it. The deployment sets `GOMEMLIMIT=1600MiB` under `--memory 2Gi`: 20
+  concurrent downloads of a 100,000-actor snapshot reached 2.1 GB without it and 1.6 GB with 1500
+  MiB.
+- 2026-11-16, orchestrator, from the third review of pull request 4: staleness is judged at the
+  listing that read the snapshot, not at the request, because a listing serves up to 30 s and the
+  reporter's default limit is 15 s: a healthy cluster showed stale in 18 of 25 samples. A snapshot
+  is also stale when it is older than the limit plus 60 s now, which covers a listing that went old
+  in a bucket outage; such an outage serves the last listing to requests without `?nocache=1`. FS-9
+  clears within one interval plus the cache period.
+- 2026-11-16, orchestrator, from the review of #416: the site decodes a snapshot without refusing
+  unknown fields and then runs `Snapshot.Validate`, so a field added to `v1` later does not turn a
+  cluster with a newer reporter into an error before the site is redeployed; the reporter and the
+  tests keep the strict `inventory.DecodeSnapshot`. Staleness and `age_s` use the object's update
+  time from the bucket, not the reporter's clock, when the store has one. The events route has its
+  own limit, 1 request a second per user, burst 5, because each request is a BigQuery job; the
+  reader follows the result's page tokens up to 1000 rows.
+- 2026-11-16, orchestrator: pull requests 3 and 4 merged as #415 and #416. Drift check against
+  `main` at `a12f48a0` (research.md, "Audit of main, 2026-11-16, after pull requests 3 and 4
+  merged"). The seven steps hold. Step 1 of the README's drift check no longer says that no RPC
+  enumerates environments, because `ListEnvironments` (#392) does, one atespace page per call; the
+  step now watches for a call that lists across atespaces or a watch call.
+- 2026-11-16, orchestrator: the reporter's tracing and metrics, which the entry of 2026-11-16 on
+  pull request 3 made a pull request of their own, are row 2c of the execution plan's table.
+- 2026-11-16, orchestrator: the environment labels of
+  `docs/plans/ate-env-api/environment-metadata.md` (#391, store in #407) are recorded in
+  `interfaces.md` as a possible source for `actors[].labels`. No pull request of this plan reads the
+  store; the field stays empty.

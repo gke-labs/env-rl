@@ -435,7 +435,23 @@ The run id stays in the client. It is not sent to ate-env-api, and environment
 names (`sb-…`, `warm-…`) don't contain it. So `teardown()` still releases only
 the environments that this process created and tracks. An orchestrator can't
 reap a crashed worker's environments by run id. Reaping across processes needs
-server-side labels and listing in ate-env-api, which don't exist yet.
+server-side labels in ate-env-api, which don't exist yet.
+
+`teardown(verify=True)` returns a `TeardownReport`: of the environments that the
+reap targeted, the ones that still exist (`surviving`), counted per status
+(`by_status`). `report.clean` is true when none is left. It checks only what
+this process's reap targeted, never another caller's environments in the same
+atespace. An environment that `release()` or `release_all()` deleted before the
+teardown is not a target of the reap, so the report does not include it. The
+verify reads the targets with `ListEnvironments`, or with `GetEnvironment` per
+id against an ate-env-api without that RPC. When the reap raises, the error is
+raised as before and carries the report as `teardown_report`, or the verify's
+error as `teardown_report_error` when the verify raises too. An environment
+whose delete failed stays in each later report of the run until a verify reads
+it as gone. The backend keeps these targets for the 64 most recently reaped
+runs. `report.clean` is also true when `checked` is 0: no reap of the run was
+recorded. A backend that cannot verify raises `NotImplementedError` after the
+reap, which is then complete.
 
 ### Concurrency
 

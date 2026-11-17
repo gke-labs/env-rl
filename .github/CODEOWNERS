@@ -3,7 +3,7 @@
 # where a directory pattern above also matches them.
 
 # Default.
-*                               @tomergee
+*                               @sunnylovestiramisu @tomergee
 
 # Clients and integrations.
 /cmd/ate-env/                   @tomergee
@@ -25,7 +25,7 @@
 /.ko.yaml                       @tomergee
 /go.mod                         @tomergee
 /go.sum                         @tomergee
-/docs/                          @tomergee
+/docs/                          @sunnylovestiramisu @tomergee
 
 # Security-sensitive: the API listener, the port proxy, MCP, the Substrate
 # client, the router TLS client, the wire API, the deployment manifest, the

@@ -90,7 +90,7 @@ This document is the canonical reference for common failure modes, diagnostic st
 
 ### Working tree restoration guarantees in `check-substrate-head.sh`
 - **Symptom:** Aborting a `check-substrate-head` run (via `Ctrl-C` or early test failure) leaves modified `go.mod` or leftover `go.work` files.
-- **Cause:** Testing compatibility against Substrate HEAD temporarily mutates `go.mod` or creates a temporary `go.work`.
+- **Cause:** Testing compatibility against a remote Substrate ref (`release-1.0` by default, or an explicit ref such as `main`) or a local checkout temporarily mutates `go.mod` or creates a temporary `go.work`.
 - **Protection:** [`hack/ci/check-substrate-head.sh`](../../hack/ci/check-substrate-head.sh) backs up `go.mod`, `go.sum`, and workspace state before modification and registers a bash `EXIT` trap that guarantees the working tree is restored cleanly even on crash or abort.
 
 ---

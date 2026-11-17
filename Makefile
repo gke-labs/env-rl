@@ -64,7 +64,7 @@ ci-e2e: ## Run end-to-end tests against local kind cluster
 smoke: ## Run smoke tests against a running cluster
 	hack/ci-compat.sh --host-network smoke
 
-check-substrate-head: ## Verify compatibility against substrate@HEAD (or custom REF/DIR via ARGS)
+check-substrate-head: ## Verify compatibility against substrate@release-1.0 (or custom REF/DIR via ARGS)
 	hack/ci-compat.sh check-substrate-head $(ARGS)
 
 check-pins: ## Verify flake and dependency pin freshness

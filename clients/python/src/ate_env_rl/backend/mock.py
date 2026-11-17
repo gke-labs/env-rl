@@ -23,8 +23,14 @@ from typing import Any
 from ..errors import SandboxStartError
 from ..telemetry import metrics
 from ..telemetry.trace_recorder import current_slot_wait_s, is_measure_mode
-from ..types import EnvironmentSpec, PreflightCheck, RawSandboxInstance
-from .base import BackendDriver
+from ..types import (
+    EnvironmentSpec,
+    EnvironmentStatus,
+    PreflightCheck,
+    RawSandboxInstance,
+    TeardownReport,
+)
+from .base import BackendDriver, record_reap_targets, settle_reap_targets
 
 
 class MockBackendDriver(BackendDriver):
@@ -39,6 +45,9 @@ class MockBackendDriver(BackendDriver):
         self.warm_pools: dict[str | tuple[str, str | None], int] = collections.defaultdict(int)
         self.instances: dict[str, RawSandboxInstance] = {}
         self.reaped_runs: set[str] = set()
+        # run id -> the instances its reaps targeted and no verify has read as
+        # gone (verify_teardown), for the last REAP_TARGET_RUNS runs.
+        self.reap_targets: dict[str, list[str]] = {}
 
     def preflight_checks(self, images: Sequence[str]) -> list[PreflightCheck]:
         """The mock serves every image and has room: each check is ok."""
@@ -157,9 +166,20 @@ class MockBackendDriver(BackendDriver):
     def reap(self, run_id: str) -> int:
         self.reaped_runs.add(run_id)
         to_del = [iid for iid, inst in self.instances.items() if inst.run_id == run_id]
+        record_reap_targets(self.reap_targets, run_id, to_del)
         for iid in to_del:
             del self.instances[iid]
         return len(to_del)
+
+    def verify_teardown(self, run_id: str) -> TeardownReport:
+        """The mock's instances that the reaps of run_id targeted and that
+        still exist. The mock keeps no status: each counts as RUNNING. A
+        surviving instance stays a target for the next verify."""
+        targets = list(self.reap_targets.get(run_id, []))
+        surviving = tuple(iid for iid in targets if iid in self.instances)
+        settle_reap_targets(self.reap_targets, run_id, set(targets) - set(surviving))
+        by_status = {EnvironmentStatus.RUNNING: len(surviving)} if surviving else {}
+        return TeardownReport(checked=len(targets), surviving=surviving, by_status=by_status)
 
     def build_runtime(
         self, instance: RawSandboxInstance, data_plane: str = "mock"

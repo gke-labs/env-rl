@@ -5,10 +5,10 @@ request and every follow-up is merged. Criteria OH-1 to OH-4, OH-6, OH-7 and OH-
 on the live test cluster from the plan's branch heads before they merged. OH-8 (docs) is met: the
 review of 2026-10-27 passed, and #345 removed the drift that `integrations/openhands/README.md` and
 `docs/security/threat-model.md` had on 2026-11-09. OH-5 (a published layer image) is out of scope by
-decision D-5. OH-12 (a live regression of merged `main`) and OH-13 (the same on Substrate
-`274605f1`, the version `main` pins) are open and not run. OH-14 (the session key not readable
-through `/proc`) is a follow-up. OH-10 and OH-11 (Tunix, upstream OpenHands) are stretch goals and
-not started.
+decision D-5. OH-12 (a live regression of merged `main`) and OH-13 (the same on Substrate v1.0.0,
+which has the same runtime code as `274605f1`, the version `main` pinned in #254) are open and not
+run. OH-14 (the session key not readable through `/proc`) is a follow-up. OH-10 and OH-11 (Tunix,
+upstream OpenHands) are stretch goals and not started.
 
 ## Goal
 

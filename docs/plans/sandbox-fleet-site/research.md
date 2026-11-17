@@ -220,6 +220,67 @@ no labels, so `actors[].labels` has no source; `ate-env-api` has no `-ateapi-end
 `-ateapi-ca-file` flag; and `fakecontrol` gave actors no uid or timestamps, which it now does, as
 the control plane does.
 
+## Audit of main, 2026-11-16
+
+Checked against `ai-on-gke/sandboxenv-rl` at `66b0e526`, with pull request 3 on top; the Substrate
+`go.mod` requires is unchanged, `274605f1f2a8`. The seven steps of the drift check:
+
+1. `env.proto` has the same nine RPCs. No call enumerates environments on `main`. Open pull request
+   #392 adds `ListEnvironments`, one atespace page per call; when it lands, the reporter still lists
+   across atespaces through `ateapi`, so the plan holds, and this step records it.
+2. Substrate is the same version as on 2026-11-10; nothing to re-read.
+3. The JSON example in `interfaces.md` equals `internal/inventory/testdata/snapshot.golden.json`;
+   `go test ./internal/inventory/` passes.
+4. The six `ate_env_api_*` families in `docs/metrics.md` are unchanged, and hold the four the named
+   queries use. Substrate's registry is the same version.
+5. `ate-env manifest` has `access-policy --global`, `--metrics-port`, `--enable-tracing`,
+   `--otlp-endpoint`, `--otlp-insecure` and `reporter` (#349); pull request 3 adds `collector` and
+   `--pod-monitoring`.
+6. `cmd/benchmarking/bench/bundle.go` is unchanged since `f10c68c`.
+7. `FS-` is used by this plan only.
+
+What pull request 3 found, recorded in [decisions.md](./decisions.md): the contrib collector's
+`google_cloud_storage` exporter takes traces and a partition from 0.145.0, and since 0.165.0 the
+component names are `google_client_auth`, `otlp_http` and `google_cloud_storage`; with
+`reuse_if_exists` it reads the bucket's attributes at start, which takes `storage.buckets.get`; and
+an object name is `<prefix>/<partition>/<file_prefix>_<uuid>.gz`.
+
+## Audit of main, 2026-11-16, after the rebase onto 9fed77fc
+
+Pull request 3 is rebased onto `9fed77fc`. What moved since `66b0e526`:
+
+1. #392 merged (`469f18a0`): `env.proto` has ten RPCs, the tenth `ListEnvironments`, one page of one
+   atespace per call through `ate-env-api`. The reporter still lists every atespace at once through
+   `ateapi`, so the plan holds.
+2. The Substrate `go.mod` requires is unchanged, `274605f1f2a8`.
+3. `internal/inventory` is unchanged; the golden file equals the example of `interfaces.md`.
+4. `docs/metrics.md` is unchanged.
+5. `ate-env manifest` gained `--environment-metadata` (#407), which adds a Role and a RoleBinding to
+   the manifest; the flags of step 5 are all there.
+6. `cmd/benchmarking/bench/bundle.go` is unchanged.
+7. `FS-` is used by this plan only.
+
+## Audit of main, 2026-11-16, after pull requests 3 and 4 merged
+
+Checked against `ai-on-gke/sandboxenv-rl` at `a12f48a0`. Pull requests 3 and 4 are on `main` as #415
+(`f548c13b`) and #416 (`b4d69141`). What moved since `9fed77fc`:
+
+1. `env.proto` is unchanged: ten RPCs, and `ListEnvironments` reads one page of one atespace per
+   call. The README's step 1 now states that, in place of "no RPC enumerates environments".
+2. The Substrate `go.mod` requires is unchanged, `274605f1f2a8`. `google.golang.org/api` moved from
+   an indirect to a direct requirement at the same version, because the site imports it (#416).
+3. `internal/inventory` is unchanged; the golden file equals the example of `interfaces.md`, and
+   `go test ./internal/inventory/` passes.
+4. `docs/metrics.md` is unchanged.
+5. `ate-env manifest` has `collector` and `--pod-monitoring` (#415) next to the flags of step 5.
+6. `cmd/benchmarking/bench/bundle.go` is unchanged.
+7. `FS-` is used by this plan only.
+
+The environment-metadata plan (#391) is on `main` with its store (#407). It gives environments
+labels once its create field lands; `interfaces.md` names that as a possible source for
+`actors[].labels`. `deploy/fleet-site/` and `docs/fleet-site.md` do not exist yet; they are pull
+request 6.
+
 ## Sources
 
 - Substrate: `docs/observability.md`, `internal/actorevent/actorevent.go`,

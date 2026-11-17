@@ -17,6 +17,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -1739,5 +1741,70 @@ func TestManifestPortProxyHostSuffix(t *testing.T) {
 		if _, err := runManifest(t, args...); err != nil {
 			t.Errorf("%q: %v, want the manifest", args, err)
 		}
+	}
+}
+
+// FS-6: --pod-monitoring renders a PodMonitoring that scrapes ate-env-api's
+// metrics port every 5 s, selecting the pods of the API Deployment.
+func TestManifestPodMonitoring(t *testing.T) {
+	out, err := runManifest(t, "--namespace=team-a", "--metrics-port=9090", "--pod-monitoring")
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs := strings.Split(out, "\n---\n")
+	var pm struct {
+		APIVersion string `json:"apiVersion"`
+		Kind       string `json:"kind"`
+		Metadata   struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		} `json:"metadata"`
+		Spec struct {
+			Selector  metav1.LabelSelector `json:"selector"`
+			Endpoints []struct {
+				Port     string `json:"port"`
+				Path     string `json:"path"`
+				Interval string `json:"interval"`
+			} `json:"endpoints"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal([]byte(docs[len(docs)-1]), &pm); err != nil {
+		t.Fatal(err)
+	}
+	if pm.APIVersion != "monitoring.googleapis.com/v1" || pm.Kind != "PodMonitoring" {
+		t.Fatalf("last document is %s %s, want monitoring.googleapis.com/v1 PodMonitoring:\n%s", pm.APIVersion, pm.Kind, out)
+	}
+	if pm.Metadata.Name != apiName || pm.Metadata.Namespace != "team-a" {
+		t.Errorf("PodMonitoring %s/%s, want team-a/%s", pm.Metadata.Namespace, pm.Metadata.Name, apiName)
+	}
+
+	cfg := testManifestConfig()
+	cfg.namespace = "team-a"
+	podLabels := buildAPIDeployment(cfg).Spec.Template.Labels
+	if !reflect.DeepEqual(pm.Spec.Selector.MatchLabels, podLabels) {
+		t.Errorf("selector %v, want the API pods' labels %v", pm.Spec.Selector.MatchLabels, podLabels)
+	}
+	if len(pm.Spec.Endpoints) != 1 {
+		t.Fatalf("endpoints = %+v, want one", pm.Spec.Endpoints)
+	}
+	if e := pm.Spec.Endpoints[0]; e.Port != metricsPortName || e.Path != "/metrics" || e.Interval != "5s" {
+		t.Errorf("endpoint = %+v, want port %q, /metrics, every 5s", e, metricsPortName)
+	}
+}
+
+func TestManifestPodMonitoringOffByDefault(t *testing.T) {
+	out, err := runManifest(t, "--metrics-port=9090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "PodMonitoring") {
+		t.Errorf("manifest without --pod-monitoring renders a PodMonitoring:\n%s", out)
+	}
+}
+
+func TestManifestPodMonitoringNeedsMetricsPort(t *testing.T) {
+	_, err := runManifest(t, "--pod-monitoring")
+	if err == nil || !strings.Contains(err.Error(), "--metrics-port") {
+		t.Errorf("err = %v, want one that asks for --metrics-port", err)
 	}
 }

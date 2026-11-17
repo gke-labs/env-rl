@@ -88,9 +88,11 @@ for control-plane terms.
 - **Park**: The between-step action in multi-step RL rollouts (`suspend`, `delete`, or `none`).
 - **Pre-flight**: Putting every task image's layers and golden snapshot on every node of its
   placement domains before a run, so the run's first boot of an image on a node is a restore, not a
-  pull; distinct from the fleet's `preflight()`, which checks the connection to `ate-env-api`.
-  `swebench-loader preflight`, `swebench-loader run -placement -preflight` and
-  `ate_env_rl.PreflightWarmer` run it from an `image-placement.json` plan and
+  pull; distinct from the fleet's `preflight()`, which checks the connection to `ate-env-api`, and
+  `preflight_report()`, which returns a `PreflightReport` over connectivity, each loaded image's
+  derived template and golden snapshot (`GetImageStatus`), and placement domains
+  (`ListPlacementDomains`). `swebench-loader preflight`, `swebench-loader run -placement -preflight`
+  and `ate_env_rl.PreflightWarmer` run it from an `image-placement.json` plan and
   `python -m ate_env_harbor.warm` over a Harbor dataset, each after a wait for the image's golden,
   while `WarmImage` (`ate-env warm-image`) covers one image and domain with no golden wait, so call
   it after `GetImageStatus` (`ate-env image-status`) reports `READY` when the run relies on the

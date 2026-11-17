@@ -62,6 +62,14 @@ user needs to know across them.
   `localhost`, a name of its Service or a name in `--allowed-hosts`, or when
   the port proxy is off (`--atenet-connect` empty).
   `ate_env_e2b.Sandbox.get_host` does not use the form yet.
+- Python client: `teardown(verify=True)` on both fleets returns a
+  `TeardownReport`: the environments that the reap targeted (the ones the
+  fleet created, warm-pool ones included) and that still exist, with counts
+  per status. It reads them with `ListEnvironments`, or with
+  `GetEnvironment` per id on a server without it. When the reap raises, the
+  error carries the report as `teardown_report`, or the verify's error as
+  `teardown_report_error`. An environment whose delete failed stays in each
+  later report of the run until a verify reads it as gone (FL-18, FL-19).
 - `ListEnvironments` on `EnvironmentService`: the environments of one
   atespace, one page per call. `page_size` defaults to 100, and the server
   lowers a value above 1000 to 1000. `page_token` is Substrate's token. An
@@ -172,6 +180,26 @@ user needs to know across them.
   and `cluster` to be one path segment each (no `/` or `\`, not `.` or `..`);
   the reporter refuses such a `-project` or `-cluster` at start, and `-out-dir`
   writes stay under the directory.
+- `ate-env-fleet-site` (`cmd/ate-env-fleet-site`): the read-only fleet site
+  for Cloud Run behind Identity-Aware Proxy. It serves the Fleet page (every
+  cluster's `ate-env-api` deployments, WorkerPools, actors by state and
+  snapshot age, stale after three reporter intervals), the Cluster page
+  (deployments, WorkerPools with capacity and allocation, workers, actors
+  filtered by atespace, template, state and node, templates, atespaces, tags)
+  and a JSON API: `/api/v1/clusters`, `/api/v1/clusters/{project}/{cluster}`
+  (`?nocache=1` revalidates at once) and `/api/v1/actors/{uid}/events` from the
+  BigQuery view `FLEET_EVENTS_TABLE`. It verifies the IAP assertion against
+  `FLEET_IAP_AUDIENCE` on every request, serves `GET` and `HEAD` only, and
+  reads the snapshots from `FLEET_BUCKET`, or `-dir` for a local run with
+  `-insecure-no-iap` on a loopback address. No image is published yet.
+- `ate-env manifest collector` prints the fleet telemetry collector, one per
+  cluster in namespace `ate-env-collector`: OTLP traces in on 4317 and 4318,
+  out to Cloud Trace in `--project` through `telemetry.googleapis.com` and as
+  gzip OTLP/JSON files under `v1/traces/` in `--bucket`. It runs
+  `otel/opentelemetry-collector-contrib` 0.165.0, pinned by digest, as the
+  Google service account that `--gcp-service-account` binds through Workload
+  Identity. `ate-env manifest --pod-monitoring`, with `--metrics-port`, adds a
+  Managed Prometheus `PodMonitoring` that scrapes `ate-env-api` every 5 s.
 - Pre-flight knobs on `FleetConfig` (they apply with `preflight=True`):
   `preflight_probes_per_node` (2, at most 8), `preflight_rounds` (3, at most
   10), `preflight_probe_timeout_s` (600, at least a microsecond and at most
@@ -651,7 +679,7 @@ user needs to know across them.
   and push it to your own registry (see `integrations/openhands/README.md`).
   The v0.1.0 image (`oh-agent-server-layer:1.55.0-v0.1.0`) gets no updates: it
   predates the #267 security re-lock. An org admin can delete the package.
-- Built against Substrate `274605f1` (2026-11-05), from `475f49b0`. The
+- Built against Substrate `v1.0.0` (`b34fbee7`, 2026-11-05), from `475f49b0`. The
   control plane API is unchanged for ate-env (`MintActorCertificate`, which
   ate-env never called, is gone). Three runtime changes reach a template.
   Since `5d226a50` the container runs as the image's `USER` in its `WORKDIR`
@@ -666,7 +694,11 @@ user needs to know across them.
   `securityContext.capabilities.add` accepts 12 capabilities only; ate-env
   templates set none. The Kind e2e installs Substrate with
   `ate-setup --kind deploy ate-system`, since Substrate removed
-  `hack/install-ate-kind.sh`.
+  `hack/install-ate-kind.sh`, and `make check-substrate-head` now checks
+  `release-1.0` by default (`ARGS=main` checks upstream `main`). We do not
+  promise to always track stable Substrate versions, so later releases may
+  drift beyond a stable Substrate release; cross-check each sandboxenv-rl
+  release's notes.
 - `ate-env manifest template`: `--snapshots-bucket` is optional. Without it
   the template names no `snapshotConfig.storageLocation` and its snapshots go
   to the cluster's `--snapshot-location`. With it, ate-api-server needs the

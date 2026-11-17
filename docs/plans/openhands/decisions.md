@@ -15,7 +15,8 @@ registry paths and local paths are left out.
 - Why: Substrate v0.6.0 needs PodCertificateRequest and ClusterTrustBundle (GKE 1.37 by default) and
   Workload Identity for snapshots (F-1).
 - Consequence: the cluster ran Substrate v0.6.0 for the recorded runs and `475f49b0` from
-  2026-10-29. `main` now pins `274605f1` (#254), thus OH-13.
+  2026-10-29. `main` pinned `274605f1` in #254 and now pins v1.0.0 (#419, which has the same runtime
+  code as `274605f1`), thus OH-13.
 
 ### D-2: the scripted LLM for OH-2 (2026-10-26)
 
@@ -102,10 +103,10 @@ registry paths and local paths are left out.
 - Why: Substrate v0.6.0's `DeleteActor` takes any state, terminates the workload and deletes the
   snapshot files; the suspend added failure modes only, and refused a crashed actor (F-AC7-2).
 - Consequence: on Substrate v0.6.0, crashed environments are deleted through ate-env-api, the
-  clients and the fleet. Substrate `274605f1` (the pin on `main` since #254) refuses `DeleteActor`
-  on a `CRASHED` actor with `FailedPrecondition`, thus `ate-env delete` of a crashed environment
-  fails there; see OH-12 check 2 in
-  [acceptance-criteria.md](./acceptance-criteria.md#oh-12-live-regression-of-merged-main).
+  clients and the fleet. Substrate v1.0.0 (the pin on `main` since #419, which has the same runtime
+  code as `274605f1` from #254) refuses `DeleteActor` on a `CRASHED` actor with
+  `FailedPrecondition`, thus `ate-env delete` of a crashed environment fails there; see OH-12 check
+  2 in [acceptance-criteria.md](./acceptance-criteria.md#oh-12-live-regression-of-merged-main).
 
 ### A 120 s wakeup probe with a sidecar readiness URL (2026-10-27, #139)
 

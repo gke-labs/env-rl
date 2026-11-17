@@ -173,7 +173,15 @@ type manifestConfig struct {
 	otlpEndpoint  string
 	otlpInsecure  bool
 	metricsPort   int32
+	// podMonitoring adds a Managed Service for Prometheus PodMonitoring
+	// that scrapes the metrics port every podMonitoringInterval; it needs
+	// metricsPort.
+	podMonitoring bool
 }
+
+// podMonitoringInterval is the scrape interval of the PodMonitoring, the
+// resolution the fleet site's metrics need (FS-6).
+const podMonitoringInterval = "5s"
 
 // resolveAuth applies --insecure-no-auth and rejects an empty --auth-token-secret.
 func (c *manifestConfig) resolveAuth(secretChanged bool) error {
@@ -220,6 +228,9 @@ func (c *manifestConfig) validateTelemetry() error {
 	}
 	if c.metricsPort != 0 && c.metricsPort == c.apiPort {
 		return fmt.Errorf("--metrics-port %d is the API port; metrics are served on a listener of their own", c.metricsPort)
+	}
+	if c.podMonitoring && c.metricsPort == 0 {
+		return errors.New("--pod-monitoring needs --metrics-port: there is no metrics port to scrape")
 	}
 	return nil
 }
@@ -377,7 +388,7 @@ func (c *templateConfig) validateResources() error {
 
 // addCapabilityNames are the capabilities that Substrate lets a container
 // add, sorted. It is a copy of AllowedAddCapabilities in Substrate's
-// internal/resources/validate.go at commit 274605f1, the pin in go.mod: the
+// internal/resources/validate.go at v1.0.0 (b34fbee7), the pin in go.mod: the
 // package is internal, thus this file cannot import it. Update the list with
 // the pin. The names have no CAP_ prefix and Substrate compares them exactly.
 var addCapabilityNames = []string{
@@ -569,11 +580,13 @@ the "template" subcommand: ate-env manifest template`,
 	cmd.Flags().StringVar(&mCfg.otlpEndpoint, "otlp-endpoint", "", "OTLP/gRPC collector endpoint for ate-env-api's traces, set as OTEL_EXPORTER_OTLP_ENDPOINT, e.g. http://otel-collector.observability:4317")
 	cmd.Flags().BoolVar(&mCfg.otlpInsecure, "otlp-insecure", false, "set OTEL_EXPORTER_OTLP_INSECURE=true: talk to the collector in plaintext")
 	cmd.Flags().Int32Var(&mCfg.metricsPort, "metrics-port", 0, "port ate-env-api serves Prometheus metrics on (--metrics-listen-addr), exposed on the container and the Service as \"metrics\" with prometheus.io scrape annotations; 0 leaves metrics off. The metrics listener has no authentication and no Host check")
+	cmd.Flags().BoolVar(&mCfg.podMonitoring, "pod-monitoring", false, "add a PodMonitoring (monitoring.googleapis.com/v1) that has Google Cloud Managed Service for Prometheus scrape the metrics port every "+podMonitoringInterval+"; needs --metrics-port and Managed Prometheus on the cluster. The pod keeps its prometheus.io annotations, so a cluster that also runs an annotation-based scraper scrapes the port twice")
 
 	cmd.AddCommand(newManifestTemplateCommand())
 	cmd.AddCommand(newManifestAccessPolicyCommand())
 	cmd.AddCommand(newManifestAuthSecretCommand())
 	cmd.AddCommand(newManifestReporterCommand())
+	cmd.AddCommand(newManifestCollectorCommand())
 
 	return cmd
 }
@@ -765,10 +778,14 @@ func buildManifests(cfg manifestConfig) []any {
 		role, binding := buildEnvironmentStoreRole(cfg)
 		objs = append(objs, role, binding)
 	}
-	return append(objs,
+	objs = append(objs,
 		buildAPIDeployment(cfg),
 		buildAPIService(cfg),
 	)
+	if cfg.podMonitoring {
+		objs = append(objs, buildPodMonitoring(cfg))
+	}
+	return objs
 }
 
 // environmentStoreRoleName names the Role and the RoleBinding of ate-env-api's
@@ -805,6 +822,30 @@ func buildEnvironmentStoreRole(cfg manifestConfig) (*rbacv1.Role, *rbacv1.RoleBi
 		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: apiName, Namespace: cfg.namespace}},
 	}
 	return role, binding
+}
+
+// buildPodMonitoring returns the PodMonitoring that scrapes ate-env-api's
+// metrics port. Managed Service for Prometheus adds the project, location,
+// cluster and namespace labels to each series. This repository links no Go
+// type for the kind, so the object is a map.
+func buildPodMonitoring(cfg manifestConfig) map[string]any {
+	return map[string]any{
+		"apiVersion": "monitoring.googleapis.com/v1",
+		"kind":       "PodMonitoring",
+		"metadata": map[string]any{
+			"name":      apiName,
+			"namespace": cfg.namespace,
+			"labels":    map[string]any{"app": apiName},
+		},
+		"spec": map[string]any{
+			"selector": map[string]any{"matchLabels": map[string]any{"app": apiName}},
+			"endpoints": []any{map[string]any{
+				"port":     metricsPortName,
+				"path":     "/metrics",
+				"interval": podMonitoringInterval,
+			}},
+		},
+	}
 }
 
 // apiPrincipal is the identity ate-env-api presents to the Substrate control

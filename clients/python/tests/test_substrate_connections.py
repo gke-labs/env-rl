@@ -68,7 +68,11 @@ async def test_actors_spread_over_separate_connections(recording_server):
     endpoint, envs = recording_server
     driver = SubstrateBackendDriver(api_endpoint=endpoint, connections=3)
     try:
+        # 24 random actor IDs miss one of 3 CRC32 buckets once in 5,600 runs.
+        # Draw up to 96 (miss probability < 4e-17) when 24 miss a bucket.
         instances = [await driver.acquire_async("tmpl", run_id="r") for _ in range(24)]
+        while len(set().union(*envs.peers.values())) < 3 and len(instances) < 96:
+            instances.append(await driver.acquire_async("tmpl", run_id="r"))
         # Every call for one actor uses the same connection ...
         for inst in instances:
             assert driver._client_for(inst.instance_id) is driver._client_for(inst.instance_id)
@@ -144,10 +148,23 @@ def test_fleet_sizes_the_pool(max_concurrent, connections, expected):
 
 async def test_fleet_runs_over_the_pool(recording_server):
     endpoint, envs = recording_server
-    fleet = AsyncSandboxFleet(FleetConfig(endpoint=endpoint, template="tmpl", connections=2))
+    max_concurrent = 64
+    fleet = AsyncSandboxFleet(
+        FleetConfig(
+            endpoint=endpoint,
+            template="tmpl",
+            connections=2,
+            max_concurrent=max_concurrent,
+        )
+    )
     try:
         img = "docker.io/library/python@sha256:" + "e" * 64
+        # 12 random actor IDs land in one of 2 CRC32 buckets once in 2,048 runs.
+        # Draw up to max_concurrent (64, miss probability < 2e-19) when needed.
         sandboxes = [await fleet.acquire(Task(id=f"t{i}", image=img)) for i in range(12)]
+        while len(set().union(*envs.peers.values())) < 2 and len(sandboxes) < max_concurrent:
+            i = len(sandboxes)
+            sandboxes.append(await fleet.acquire(Task(id=f"t{i}", image=img)))
         for sb in sandboxes:
             await fleet.release(sb)
     finally:

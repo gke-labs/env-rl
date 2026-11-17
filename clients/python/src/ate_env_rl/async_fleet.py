@@ -41,7 +41,7 @@ from .telemetry.trace_recorder import (
     register_env_meta,
     task_context,
 )
-from .types import FleetPlan, PreflightCheck, PreflightReport, Task
+from .types import FleetPlan, PreflightCheck, PreflightReport, Task, TeardownReport
 
 logger = logging.getLogger("sandbox_sdk.async_fleet")
 
@@ -515,7 +515,8 @@ class AsyncSandboxFleet:
                 )
         return True
 
-    async def teardown(self) -> None:
+    async def teardown(self, verify: bool = False) -> TeardownReport | None:
+        """Tear down as SandboxFleet.teardown, with the same ``verify``."""
         try:
             with self.observer.phase("teardown", backend=self._backend_label):
                 if hasattr(self.backend, "reap_async"):
@@ -524,10 +525,25 @@ class AsyncSandboxFleet:
                     await asyncio.to_thread(self.backend.reap, self._fleet.run_id)
             # The reap deleted every handed-out environment.
             self._fleet._active_handles = {}
+        except Exception as e:
+            if verify:
+                try:
+                    e.teardown_report = await self._verify_teardown()  # type: ignore[attr-defined]
+                except Exception as verify_error:
+                    e.teardown_report_error = verify_error  # type: ignore[attr-defined]
+            raise
         finally:
             self.observer.warm_reset()
             # The next setup() or run() warms again.
             self._fleet._preflight_for = None
+        if verify:
+            return await self._verify_teardown()
+        return None
+
+    async def _verify_teardown(self) -> TeardownReport:
+        if hasattr(self.backend, "verify_teardown_async"):
+            return await self.backend.verify_teardown_async(self._fleet.run_id)
+        return await asyncio.to_thread(self.backend.verify_teardown, self._fleet.run_id)
 
     # --- Async Context Manager ---
     async def __aenter__(self) -> AsyncSandboxFleet:

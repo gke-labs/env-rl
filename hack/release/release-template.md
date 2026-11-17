@@ -70,5 +70,7 @@ pip install "git+https://github.com/ai-on-gke/sandboxenv-rl.git@$TAG#subdirector
 ### Server & Runtime Dependencies
 $SERVER_DEPENDENCIES
 
+> **Substrate Version Tracking:** This release is pinned against the Agent Substrate revision listed above. We do not promise to always track stable Substrate versions, so later releases may drift beyond a stable Substrate release; always cross-check each sandboxenv-rl release's notes for its pinned Substrate revision.
+
 ### Contributors
 $CONTRIBUTORS

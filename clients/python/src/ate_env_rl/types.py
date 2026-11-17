@@ -154,6 +154,37 @@ class EnvironmentInfo:
 
 
 @dataclass(frozen=True)
+class TeardownReport:
+    """What ``teardown(verify=True)`` found after the reap (FL-18, FL-19).
+
+    ``checked`` is how many environments the reaps of the run deleted or tried
+    to delete: the ones the fleet's backend created and tracked for the run,
+    warm-pool ones included, less the ones an earlier verify read as gone.
+    ``surviving`` lists those that still exist, and ``by_status`` counts them
+    per status. An environment that the fleet did not create is never checked.
+    Neither is one that the server made for a create that the backend stopped
+    (the acquire raised and the backend does not track it): the reap does not
+    delete it either. A backend keeps the targets of its last 64 reaped runs,
+    so a verify that comes more than 64 reaped runs later checks nothing and
+    reports ``clean``, even when an environment of the run is alive.
+    """
+
+    checked: int
+    surviving: tuple[str, ...] = ()
+    by_status: Mapping[EnvironmentStatus, int] = field(default_factory=dict)
+
+    @property
+    def clean(self) -> bool:
+        """True when nothing that the reap targeted still exists.
+
+        Also true when ``checked`` is 0: no reap of the run was recorded (or
+        the backend dropped it, past its last 64 reaped runs), or an earlier
+        verify read every target as gone.
+        """
+        return not self.surviving
+
+
+@dataclass(frozen=True)
 class EnvironmentPage:
     """One page of ``Client.list_environments``.
 

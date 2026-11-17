@@ -1,20 +1,16 @@
 # sandboxenv-rl architecture
 
-Status: describes `main` at `843a4b98`. Re-check the claims in §Components when `internal/ate` or
-`internal/apiservice` changes. Companion to [README.md](../README.md) (how to use it) and
-[docs/glossary.md](./glossary.md).
+Status: describes `main` at `637a24fb`. Re-check §Components when `internal/ate` or
+`internal/apiservice` changes. See [README.md](../README.md) and [docs/glossary.md](./glossary.md).
 
 ## Problem
 
 Reinforcement learning rollouts and code-agent evaluations burst hundreds of isolated environments
-in parallel, then leave them idle while policy models generate completions or tokens. Traditional
-Kubernetes pods occupy node memory, IP addresses, and scheduling slots while idle. Rebuilding
-container images for each repository benchmark duplicates common guest binaries across the container
-registry and lengthens initialization loops.
-
-Agent Substrate addresses this workload profile. Each environment runs as a Substrate actor in
-gVisor (`runsc`). When idle, actors suspend to object storage checkpoints (`gs://`) and release
-worker memory and CPU.
+in parallel, then leave them idle while policies generate tokens. Traditional Kubernetes pods occupy
+node memory, IP addresses, and scheduling slots while idle, and rebuilding images per benchmark
+duplicates guest binaries in the registry. Agent Substrate runs each environment as a gVisor
+(`runsc`) actor that suspends to object storage (`gs://`) when idle, releasing worker memory and
+CPU.
 
 ## Overview
 
@@ -66,22 +62,19 @@ child processes, and serves `ProcessService` and `FileSystemService`.
   bearer authentication, on-demand `ActorTemplate` derivation (`imagetemplate.go`), wake retries
   (`wakeretry.go`), placement discovery (`ListPlacementDomains`), and node warming (`WarmImage`,
   capped per node of a worker selector by `-warm-max-probes-per-node` via `placement.go`).
-- **Calls**: `internal/ate.Client` for control plane lifecycle calls; dials `atenet` directly per
-  request via `s.guestConn` for guest RPCs.
+- **Calls**: `internal/ate.Client` for lifecycle (and `internal/envstore.Store` under
+  `-environment-store=configmaps`), and `atenet` via `s.guestConn` for guest RPCs.
 - **Must not do**: Must not execute commands locally, buffer full files in memory, or manage
   in-memory process tracking. `guestConn` opens a connection per call, verifies actor readiness via
   `s.ensureAwake`, and closes the connection on completion.
 
 ### Substrate client boundary (`internal/ate` and `internal/routertls`)
 
-- **Owns**: All communication with Substrate's `ateapi` control plane and pooled guest connections
-  for `internal/mcp`.
-- **Calls**: `ateapi` control plane over gRPC (`:443`, round-robin load balanced) and `atenet`
-  router.
+- **Owns**: Substrate `ateapi` control-plane calls and pooled guest connections for `internal/mcp`.
+- **Calls**: `ateapi` control plane over gRPC (`:443`, round-robin load-balanced) and `atenet`.
 - **Must not do**: Must not bypass `internal/routertls` when dialing `atenet`. `internal/routertls`
-  loads the kubelet-projected pod identity certificate bundle (`-atenet-client-cert`, 24h lifetime,
-  renewed 30m early) and servicedns trust bundle (`-atenet-ca-file`), reloading changed files on TLS
-  handshakes.
+  loads the kubelet pod-identity cert bundle (`-atenet-client-cert`, 24h lifetime, renewed 30m
+  early) and servicedns trust bundle (`-atenet-ca-file`), reloading changed files on TLS handshakes.
 
 ### Guest daemon (`cmd/ate-env-guest`, `guest/process`, `guest/filesystem`)
 
@@ -106,34 +99,40 @@ child processes, and serves `ProcessService` and `FileSystemService`.
 ### HTTP surfaces on `ate-env-api` (`internal/mcp`, `internal/portproxy`, `internal/hostcheck`)
 
 - **`internal/hostcheck`**: Wraps `/healthz`, `/v1alpha/envs/{id}/mcp`, and the port proxy against
-  DNS-rebinding attacks when accessed through local browser port-forwards. gRPC services use
-  interceptors for `BearerAuth` rather than `hostcheck`. `WrapFor` lets the port proxy's route, and
-  no other, serve the names of the hostname form.
+  DNS-rebinding (`WrapFor` restricts port-proxy hostname routes to the proxy); gRPC uses
+  `BearerAuth` interceptors.
 - **`internal/mcp`**: Serves the Model Context Protocol endpoint at `POST /v1alpha/envs/{id}/mcp`.
   Translates tool calls into guest RPCs using pooled `ate.Client.DialGuest` connections.
-- **`internal/portproxy`**: Forwards HTTP/1.1 and WebSocket requests to arbitrary TCP ports inside
-  the actor by dialing `atenet`'s HTTP `CONNECT` listener (`:8444`). Scoped to configured atespaces
-  (`-port-proxy-atespaces`), pools tunnels per actor and port, validates port capabilities
-  (`internal/portproxy/capability.go`) for headerless WebSocket clients, strips auth and capability
-  headers, and validates `Origin` headers on path and hostname routes. A request names its target in
-  headers, in a path prefix or, with `-port-proxy-host-suffix`, in its `Host`
-  (`<port>-<id>[.<atespace>].<domain>`, `internal/portproxy/hostform.go`).
+- **`internal/portproxy`**: Forwards HTTP/1.1 and WebSocket requests to actor ports via `atenet`
+  HTTP `CONNECT` (`:8444`) by header, path, or `-port-proxy-host-suffix`
+  (`<port>-<id>[.<atespace>].<domain>`, `internal/portproxy/hostform.go`). Scoped to
+  `-port-proxy-atespaces`, pools tunnels, holds `X-Env-Wake-Wait` (`-port-proxy-wake-wait-cap`,
+  `DefaultWakeWaitCap` = 1m) on `apiservice.(*Server).Wake`, checks WebSocket capabilities
+  (`internal/portproxy/capability.go`) and path/hostname `Origin`, and strips proxy headers.
 
 ### CLI, SDKs, and integrations
 
 - **`cmd/ate-env`**: CLI for lifecycle (`create`, `get`, `suspend`, `delete`), inspection and
   warming (`server-info`, `newServerInfoCommand`; `image-status`, `newImageStatusCommand`;
   `placement-domains`, `newPlacementDomainsCommand`; `warm-image`, `newWarmImageCommand`), `shell`,
-  `read`/`write`, and `ate-env manifest`.
+  `read`/`write`, and `ate-env manifest` (`--environment-metadata`, `--port-proxy-host-suffix`,
+  `--pod-monitoring`, `template --add-capability`, `reporter`, `collector`).
 - **`cmd/ate-env-reporter`**: Daemon (`internal/reporter`) writing cluster fleet inventory snapshots
   (`internal/inventory`) on an interval to a bucket or directory.
-- **`clients/go`**: Public Go SDK client (`Client`, `ClientOptions` with `Connections`,
+- **`cmd/ate-env-fleet-site`**: Read-only web server (`internal/fleetsite`) for Cloud Run behind
+  Identity-Aware Proxy: the Fleet and Cluster pages and a JSON API over every cluster's snapshot,
+  and actor events from BigQuery. It holds no cluster credential.
+- **`clients/go`**: Public Go SDK (`Client` with `List`, `ClientOptions` with `Connections`,
   `DialOptions`, and `MetricsRegisterer`, `Env`, `Process`, `StartError`).
-- **`clients/python`**: `ate-env-rl` (`ate_env_rl`): async `Client` (with `credentials` TLS) and
-  `Env`, sync `SandboxFleet` (via `LoopRunner`), `AsyncSandboxFleet`, `FleetConfig` (`config.py`,
-  `preflight=True`), `PreflightWarmer` (`preflight.py`), and `adapters` (`swebench`, `r2egym`).
+- **`clients/python`**: `ate-env-rl` (`ate_env_rl`): async `Client` (`credentials`,
+  `list_environments`/`EnvironmentPage`), `Env`, `SandboxFleet` (`LoopRunner`), `AsyncSandboxFleet`
+  (`recycle`), `release_all`, `teardown(verify=True)` (`TeardownReport`), `preflight_report`
+  (`PreflightReport`), `FleetConfig` (`preflight=True`, `exit_hooks=True`), `PreflightWarmer`, and
+  `adapters` (`swebench`, `r2egym`).
+- **`integrations/e2b`**: In-repo package `ate-env-e2b` (`ate_env_e2b`). Implements E2B's `Sandbox`
+  and `AsyncSandbox` over the `envd` runtime layer and port proxy.
 - **`integrations/harbor`**: In-repo package `ate-env-harbor`. Implements `AteEnvEnvironment`, a
-  Harbor environment provider, and the dataset image warmer (`ate_env_harbor.warm`).
+  Harbor environment provider (0.25 and 0.26), and `ate_env_harbor.warm`.
 - **`integrations/nemo-gym`**: In-repo package `nemo-gym-substrate`. Implements NeMo Gym's
   `SubstrateSandboxProvider`.
 - **`integrations/openhands`**: In-repo package `ate-env-openhands`. Implements OpenHands'
@@ -147,16 +146,15 @@ child processes, and serves `ProcessService` and `FileSystemService`.
   `spindown`, `measure`, `reap`, `report`, `validate`, `upload`, `compare`, `run`) backed by
   `internal/benchmarking/{job,measure,overlay,schema,sut,swebench}` and `benchmarking/scenarios/`.
 - **`cmd/benchmarking/swebench-loader`**: Runs trajectories in `eval`, `steps`, and `open-loop`
-  modes (`run`, with `-strategy`, `-placement`, `-preflight`), resolves schedules (`resolve`),
-  renders trajectory mixes (`render-plan`, `swebench.BuildRenderedPlan`), plans image placement
-  (`plan-placement`, `swebench.PlanImagePlacement`), warms caches (`preflight`,
-  `swebench.PreflightWarmer`), and handles assets, traces, and reports (`trajectory-assets`,
-  `convert-trace`, `report`, `compare`).
-- **`internal/benchmarking/swebench`**: Emits structured JSONL events (`EventRun`, `EventCreate`,
-  `EventTTFI`, `EventTTFIC`, `EventWake`, `EventStep`, `EventTask`, `EventFork`, `EventSuspend`,
-  `EventDelete`, `EventBarrier`, `EventPark`, `EventPrewarm`, `EventReap`, `EventThink`,
-  `EventPhase`) plus pre-flight events (`EventPreflightTemplate`, `EventPreflightGolden`,
-  `EventPreflightProbe`).
+  modes (`run`, with `-strategy`, `-placement`, `-domain-width`, `-task-order`, `-preflight`, and
+  `-wake-backoff` across wake and park-suspend retries), resolves schedules (`resolve`), renders
+  mixes (`render-plan`, `swebench.BuildRenderedPlan`), plans placement (`plan-placement`,
+  `swebench.PlanImagePlacement`), warms caches (`preflight`, `swebench.PreflightWarmer`), and
+  handles `trajectory-assets`, `convert-trace`, `report`, and `compare`.
+- **`internal/benchmarking/swebench`**: Emits JSONL events (`EventRun`, `EventCreate`, `EventTTFI`,
+  `EventTTFIC`, `EventWake`, `EventStep`, `EventTask`, `EventFork`, `EventSuspend`, `EventDelete`,
+  `EventBarrier`, `EventPark`, `EventPrewarm`, `EventReap`, `EventThink`, `EventPhase`) and
+  pre-flight events (`EventPreflightTemplate`, `EventPreflightGolden`, `EventPreflightProbe`).
 - **Scripts**: `sample-node-cache.sh` and `harvest-restore-timings.sh` in `benchmarking/swebench/`
   sample containerd image caches and harvest `atelet` restore logs.
 
@@ -203,19 +201,18 @@ Key non-obvious points:
   `ensureImageTemplate` also takes the write lock and calls `recreateFailedImageTemplate` when a
   golden bake failed at least `failedTemplateRecreateAfter` (10m) ago, recreating at zero
   `templateUsers`. `GetImageStatus` reads only.
-- `getOrCreateImageTemplate` returns `codes.FailedPrecondition` when the base template is absent,
-  and `codes.InvalidArgument` if `DeriveImageTemplate` finds neither free `"guest"`/`GuestMountPath`
-  (`/ate`) slots (`checkGuestSlotFree`) nor one digest-pinned `"guest"` image volume mounted alone
-  at `/ate` with `command[0]` starting the guest (`checkGuestMounted`, `checkGuestCommand`). Runtime
-  layers carry over.
-- If a derived template runs the same digest under another path (`sameImageDigest`), it matches; on
-  mismatch, `CreateEnvironment`, `GetImageStatus`, `EnsureImageTemplate`, and `WarmImage` fail with
+- When the derived template is missing, `getOrCreateImageTemplate` reads the base template, failing
+  with `codes.FailedPrecondition` if missing or `codes.InvalidArgument` if `DeriveImageTemplate`
+  finds neither free `"guest"`/`GuestMountPath` (`/ate`) (`checkGuestSlotFree`) nor one
+  digest-pinned `"guest"` image volume alone at `/ate` with `command[0]` starting the guest
+  (`checkGuestMounted`, `checkGuestCommand`). Runtime layers carry over.
+- Derived templates running the same digest at another path match (`sameImageDigest`); on mismatch,
+  `CreateEnvironment`, `GetImageStatus`, `EnsureImageTemplate`, and `WarmImage` return
   `codes.FailedPrecondition`.
-- Optional `worker_selector` labels on `CreateEnvironment` pass to `Actor.worker_selector`
-  (narrowing the template's worker pools across creation and wakes), and `GetEnvironment` reports
-  the actor's hosting `node` (`actorNode`).
-- `ate-env-api` returns `ENVIRONMENT_STATUS_UNSPECIFIED` immediately; the actor boots
-  asynchronously.
+- Optional `worker_selector` labels on `CreateEnvironment` set `Actor.worker_selector` (narrowing
+  template worker pools across create and wake), and `GetEnvironment` and `ListEnvironments`
+  (`s.client.ListPage`) report `node` (`actorNode`) and `create_time`.
+- `ate-env-api` returns `ENVIRONMENT_STATUS_UNSPECIFIED` immediately; actors boot asynchronously.
 
 ### 2. Run a command and stream output (including wake-on-request)
 
@@ -272,16 +269,16 @@ Key non-obvious points:
   once the checkpoint is on the worker's node, the upload goes on in the background, and the
   environment reports `ENVIRONMENT_STATUS_PAUSED` until it lands. Either call leaves an environment
   that is already suspended or paused as it is.
-- **Delete**: `internal/ate.Client.Delete` calls `DeleteActor` directly (terminates the workload in
-  any state, releases the worker, and deletes snapshots) and calls `evictGuest` to close and forget
-  the pooled `guestPool` connection.
+- **Delete**: `internal/ate.Client.Delete` calls `DeleteActor` (stopping any state, releasing
+  workers/snapshots) and `evictGuest`, and `s.Store.Delete` removes any `envstore.Record`.
 
 ## State and persistence
 
-- **`ate-env-api` has no durable state**: In-memory state is limited to per-actor pools
-  (`ate.Client.guestPool`, `mcp.Server` map) and per-template locks (`imageTemplateLocks`); guest
-  connections evict on `Delete` (`evictGuest`). Active streams fail on replica restart and callers
-  reconnect on the next request.
+- **`ate-env-api` keeps no local durable state**: In-memory state is `ate.Client.guestPool` (evicted
+  on `Delete` via `evictGuest`), `mcp.Server`, `imageTemplateLocks`, and the `internal/envstore`
+  informer; streams reconnect on restart. With `-environment-store=configmaps`
+  (`-environment-store-qps`, `-environment-store-burst`), `internal/envstore` stores one `ConfigMap`
+  per labeled/deadlined environment (by actor UID) and runs `SweepOrphans` (`ActorUIDs`).
 - **Substrate control plane (`ateapi`) is the source of truth**: Stores actor records, templates,
   worker pool allocations, and state transitions in PostgreSQL.
 - **Snapshots**: Suspended actors persist memory pages and filesystem layers in object storage
@@ -294,7 +291,7 @@ Key non-obvious points:
 
 ## Relationship to Substrate
 
-`sandboxenv-rl` builds on `go.ate.dev/substrate` (`274605f1`, `ate.dev/v1` CRDs and
+`sandboxenv-rl` builds on `go.ate.dev/substrate` (`v1.0.0`, `ate.dev/v1` CRDs and
 `substrate.ateapi.v1.Control`):
 
 - **Delegated to Substrate**: Sandbox isolation (gVisor `runsc`), worker pod scheduling, durable
@@ -321,8 +318,8 @@ Key non-obvious points:
    `cmd/ate-env-guest` defaults `-workspace` to `"/"` (no confinement) unless explicitly set.
 4. **Snapshot storage**: Governed by bucket IAM, encryption keys, and retention rules.
 
-See [docs/security/threat-model.md](./security/threat-model.md) for the full threat analysis and
-list of accepted risks.
+See [docs/security/threat-model.md](./security/threat-model.md) for the threat analysis and accepted
+risks.
 
 ## Design decisions
 
@@ -333,7 +330,7 @@ list of accepted risks.
   `apiservice.(*Server).guestConn` (ephemeral per call with `ensureAwake`; required for new gRPC
   proxy RPCs); (2) `internal/ate.Client.DialGuest` (pooled per actor, duplicates interceptor logic
   from `guestConn`, and is used only by `internal/mcp` without `ensureAwake`, a known gap); (3)
-  `internal/portproxy` (`CONNECT` tunnels with its own wake loop).
+  `internal/portproxy` (`CONNECT` tunnels with its own wake loop and `X-Env-Wake-Wait` holds).
 - **Interceptors append `ate-target-actor` without forwarding caller metadata**: Forwarding incoming
   headers caused duplicate `ate-target-actor: <atespace>/<id>` headers, which `atenet-router`
   rejects with "invalid actor reference".

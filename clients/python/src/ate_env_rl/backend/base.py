@@ -18,7 +18,34 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any
 
-from ..types import EnvironmentSpec, RawSandboxInstance
+from ..types import EnvironmentSpec, RawSandboxInstance, TeardownReport
+
+# How many runs a driver keeps reap targets for, for verify_teardown (FL-18).
+# A reap cannot tell whether a verify follows, so each one records; past this
+# many runs the least recently reaped is dropped. A fleet verifies right after
+# its reap, so the run it reads is the newest.
+REAP_TARGET_RUNS = 64
+
+
+def record_reap_targets(store: dict[str, list[str]], run_id: str, targets: Sequence[str]) -> None:
+    """Record a reap's targets for run_id in store, after the ones an earlier
+    reap of the run recorded that no verify has read as gone. The caller holds
+    the lock that guards store."""
+    merged = list(dict.fromkeys([*store.pop(run_id, []), *targets]))
+    if merged:
+        store[run_id] = merged
+    while len(store) > REAP_TARGET_RUNS:
+        del store[next(iter(store))]
+
+
+def settle_reap_targets(store: dict[str, list[str]], run_id: str, gone: set[str]) -> None:
+    """Drop from run_id's targets in store the ones a verify read as gone. The
+    rest stay for the next verify. The caller holds the lock that guards store."""
+    left = [aid for aid in store.get(run_id, []) if aid not in gone]
+    if left:
+        store[run_id] = left
+    else:
+        store.pop(run_id, None)
 
 
 class BackendDriver(ABC):
@@ -106,6 +133,13 @@ class BackendDriver(ABC):
     @abstractmethod
     def reap(self, run_id: str) -> int:
         """Force delete all resources associated with a run_id."""
+
+    def verify_teardown(self, run_id: str) -> TeardownReport:
+        """Report which environments the reaps of run_id targeted and left (FL-18).
+
+        A driver that cannot tell raises NotImplementedError.
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot verify a teardown")
 
     def build_runtime(
         self, instance: RawSandboxInstance, data_plane: str = "ate_env"

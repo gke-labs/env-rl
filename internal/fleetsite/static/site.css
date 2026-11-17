@@ -1,0 +1,45 @@
+/*
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+body { font: 14px/1.4 system-ui, sans-serif; margin: 0; color: #202124; background: #fff; }
+header { display: flex; justify-content: space-between; padding: 8px 16px; background: #202124; color: #fff; }
+header a.brand { color: #fff; font-weight: 600; text-decoration: none; }
+main { padding: 8px 16px; }
+footer { padding: 8px 16px; color: #5f6368; font-size: 12px; }
+a { color: #1a73e8; }
+h1 { font-size: 22px; }
+h2 { font-size: 16px; margin-top: 24px; }
+table { border-collapse: collapse; margin: 8px 16px 8px 0; }
+caption { text-align: left; font-weight: 600; padding: 4px 0; }
+th, td { border-bottom: 1px solid #e0e0e0; padding: 3px 8px; text-align: left; vertical-align: top; }
+th { background: #f1f3f4; font-weight: 600; }
+.cols { display: flex; flex-wrap: wrap; }
+.cluster { border-top: 1px solid #dadce0; }
+.muted { color: #5f6368; }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+.error { color: #c5221f; }
+.warn { color: #b06000; font-weight: 600; }
+.badge { font-size: 12px; padding: 1px 6px; border-radius: 8px; vertical-align: middle; }
+.badge.stale { background: #fce8e6; color: #c5221f; }
+.badge.fresh { background: #e6f4ea; color: #137333; }
+.bar svg { width: 100%; max-width: 640px; height: 12px; display: block; background: #f1f3f4; }
+.filters label { margin-right: 12px; }
+.st-running { fill: #1e8e3e; color: #137333; }
+.st-resuming, .st-suspending, .st-reverting { fill: #f9ab00; color: #b06000; }
+.st-suspended { fill: #8ab4f8; color: #1967d2; }
+.st-deleting { fill: #9aa0a6; color: #5f6368; }
+.st-crashed { fill: #d93025; color: #c5221f; }
+.st-unspecified { fill: #dadce0; color: #5f6368; }

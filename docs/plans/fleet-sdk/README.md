@@ -1,8 +1,8 @@
 # Plan: client-only fleet gaps (#123)
 
 Status: proposal, 2026-11-14, checked against `main` at `456353fd`. Row 10 (FL-1 to FL-4) is built
-by #397, and rows 32 and 31 (FL-5 to FL-9) by #395; the rest is open. The criteria are in
-[acceptance-criteria.md](./acceptance-criteria.md), group `FL`.
+by #397, rows 32 and 31 (FL-5 to FL-9) by #395, and row 35 (FL-18, FL-19) by #396; the rest is open.
+The criteria are in [acceptance-criteria.md](./acceptance-criteria.md), group `FL`.
 
 ## 1. Scope
 
@@ -78,6 +78,12 @@ environment (#391).
 - **`warm_create_budget` counts creates, not images.** `warm_parallelism` stays the number of images
   warmed at once; the budget caps the warm creates in flight across all of them. Unset keeps today's
   behavior.
+- **`verify_teardown` checks what the reap targeted.** The backend records, per run, the actors its
+  reap deletes or tries to delete (the ones it created and tracks, warm-pool ones included), and the
+  verify reads only those. When the reap raises, the verify still runs and its report rides on the
+  raised error, because a failed reap is when the caller needs it most. A target stays recorded
+  until a verify reads it as gone. A reap cannot tell whether a verify follows, so the backend keeps
+  the targets of the 64 most recently reaped runs.
 - **`verify_teardown` checks only the ids this fleet created.** Without labels, an atespace that
   other callers share holds environments the fleet cannot attribute. With labels (#391), a later
   pull request can widen it to the run's label.

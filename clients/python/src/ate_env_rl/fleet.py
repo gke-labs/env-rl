@@ -56,6 +56,7 @@ from .types import (
     PreflightReport,
     RawSandboxInstance,
     Task,
+    TeardownReport,
 )
 
 logger = logging.getLogger("ate_env_rl.fleet")
@@ -806,8 +807,17 @@ class SandboxFleet:
                 )
         return True
 
-    def teardown(self) -> None:
-        """Teardown all resources provisioned by this fleet's run_id."""
+    def teardown(self, verify: bool = False) -> TeardownReport | None:
+        """Teardown all resources provisioned by this fleet's run_id.
+
+        With ``verify=True``, returns a TeardownReport of the environments
+        that the reaps of the run targeted and that still exist (FL-18). When
+        the reap raises, the verify still runs: its report is attached to the
+        raised error as ``teardown_report``, and the error is raised as
+        before. When that verify raises too, its error is attached as
+        ``teardown_report_error`` instead. A backend that cannot verify raises
+        NotImplementedError after the reap, which is then complete.
+        """
         try:
             with self._obs.phase("teardown", backend=self.backend_label):
                 self.backend.reap(self.run_id)
@@ -816,10 +826,20 @@ class SandboxFleet:
             # possibly while that thread holds _lock.
             self._active_handles = {}
             self._unregister_hooks()
+        except Exception as e:
+            if verify:
+                try:
+                    e.teardown_report = self.backend.verify_teardown(self.run_id)  # type: ignore[attr-defined]
+                except Exception as verify_error:
+                    e.teardown_report_error = verify_error  # type: ignore[attr-defined]
+            raise
         finally:
             self._obs.warm_reset()
             # The next setup() or run() warms again.
             self._preflight_for = None
+        if verify:
+            return self.backend.verify_teardown(self.run_id)
+        return None
 
     def run(self, process_fn: Callable[[Task, SandboxHandle], Any],
             concurrency: int | None = None) -> list[Any]:
