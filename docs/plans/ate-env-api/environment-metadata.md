@@ -35,12 +35,12 @@ One ConfigMap for each environment that has a label or a deadline, in the namesp
 `ate-env-api`. An environment with neither has no object, thus a caller that uses neither feature
 pays nothing.
 
-| Part              | Choice                                                                                                                                                                                               |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name              | `ate-env.<atespace>.<id>`. Both parts are DNS labels, thus the name is a valid object name and two environments never share one.                                                                     |
-| Kubernetes labels | `ate-env.dev/atespace`, and `ate-env.dev/deadline: "true"` when the object holds a deadline. They select the objects of one atespace and the ones the sweep reads.                                   |
-| Data              | `labels`: the caller's labels as one JSON object. `expire_time`: RFC 3339, UTC. `uid`: the uid of the actor, which tells a new environment from an old one with the same id.                         |
-| Read path         | A shared informer in each replica. A read of labels or of a deadline does not call the Kubernetes API. The informer of a replica follows a write on another replica after a delay (open point EM-D). |
+| Part              | Choice                                                                                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Name              | `ate-env.<atespace>.<id>`. Both parts are DNS labels, thus the name is a valid object name and two environments never share one.                                                                       |
+| Kubernetes labels | `ate-env.dev/atespace`, and `ate-env.dev/deadline: "true"` when the object holds a deadline. They select the objects of one atespace and the ones the sweep reads.                                     |
+| Data              | `labels`: the caller's labels as one JSON object. `expire_time`: RFC 3339, UTC. `uid`: the uid of the actor, which tells a new environment from an old one with the same id.                           |
+| Read path         | A shared informer in each replica. A read of labels or of a deadline does not call the Kubernetes API. The informer of a replica follows a write, its own or of another replica, after a delay (EM-D). |
 
 The caller's labels are data, not Kubernetes labels: E2B metadata values are free text, and a
 Kubernetes label value is 63 characters of a small alphabet. The filter of a list is applied by
@@ -191,11 +191,11 @@ when one does.
 - A read is as fresh as the informer of the replica that serves it. A `GetEnvironment` or a
   `ListEnvironments` on one replica, right after a `CreateEnvironment` or a
   `SetEnvironmentTimeToLive` on another, can find the actor in Substrate before the watch event of
-  the object arrives. It then returns no labels, or the earlier deadline. The replica that made the
-  write has the same delay on its own informer, unless it also keeps what it wrote. EM-D, decided: a
-  read uses the informer alone, and makes no call to the Kubernetes API. The answer of
-  `CreateEnvironment` and of `SetEnvironmentTimeToLive` holds what the call wrote. A read on another
-  replica follows after the delay of a watch event.
+  the object arrives. It then returns no labels, or the earlier deadline. EM-D, decided: a read uses
+  the informer alone, and makes no call to the Kubernetes API. The answer of `CreateEnvironment` and
+  of `SetEnvironmentTimeToLive` holds what the call wrote. A `GetEnvironment` or a
+  `ListEnvironments` follows after the delay of a watch event, on each replica: the replica that
+  made the write keeps no copy of it, thus its own reads wait for its informer too.
 - An environment that was created without the store, or before it, has no deadline. Turning the
   store off stops the sweep: deadlines are then not enforced, and the objects stay.
 
