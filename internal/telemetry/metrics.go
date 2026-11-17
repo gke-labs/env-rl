@@ -37,6 +37,7 @@ const (
 	MetricWakeWaitSeconds        = "ate_env_api_wake_wait_seconds"
 	MetricEnvironments           = "ate_env_api_environments"
 	MetricBuildInfo              = "ate_env_api_build_info"
+	MetricDeadlineDeleteFailed   = "ate_env_api_deadline_delete_failed_total"
 )
 
 // Values of the outcome label of ate_env_api_wake_wait_seconds.
@@ -131,6 +132,14 @@ var Definitions = []Definition{
 		Help:   "Always 1; the labels carry the ate-env-api build's module version and VCS commit.",
 		Labels: []string{"version", "commit"},
 	},
+	{
+		Name: MetricDeadlineDeleteFailed,
+		Type: TypeCounter,
+		Help: "Times the deadline sweep stopped trying to delete an environment: Substrate refused the delete by deadline 5 times. " +
+			"The environment is not deleted (Substrate can leave it in DELETING), and its object in the environment store carries the label ate-env.dev/deadline=failed. " +
+			"Counted once each time an environment is given up, by the replica that wrote the mark; aggregate with sum. Stays 0 without --environment-store=configmaps.",
+		Labels: []string{"atespace"},
+	},
 }
 
 // Version and Commit override the build_info labels; set them with
@@ -194,6 +203,7 @@ type Metrics struct {
 	wakeWait      *prometheus.HistogramVec
 	buildInfo     *prometheus.GaugeVec
 	environments  *environmentsCollector
+	deadlineFail  *prometheus.CounterVec
 }
 
 func definition(name string) Definition {
@@ -211,12 +221,13 @@ func newHistogram(name string) *prometheus.HistogramVec {
 }
 
 // NewMetrics creates the ate-env-api families on a new private registry and
-// sets build_info from BuildVersion. Only the six documented families are
+// sets build_info from BuildVersion. Only the documented families are
 // registered.
 func NewMetrics() *Metrics {
 	reqDef := definition(MetricRequestsTotal)
 	biDef := definition(MetricBuildInfo)
 	envDef := definition(MetricEnvironments)
+	dfDef := definition(MetricDeadlineDeleteFailed)
 	m := &Metrics{
 		registry:      prometheus.NewRegistry(),
 		requests:      prometheus.NewCounterVec(prometheus.CounterOpts{Name: reqDef.Name, Help: reqDef.Help}, reqDef.Labels),
@@ -224,11 +235,12 @@ func NewMetrics() *Metrics {
 		createToReady: newHistogram(MetricCreateToReadySeconds),
 		wakeWait:      newHistogram(MetricWakeWaitSeconds),
 		buildInfo:     prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: biDef.Name, Help: biDef.Help}, biDef.Labels),
+		deadlineFail:  prometheus.NewCounterVec(prometheus.CounterOpts{Name: dfDef.Name, Help: dfDef.Help}, dfDef.Labels),
 		environments: &environmentsCollector{
 			desc: prometheus.NewDesc(envDef.Name, envDef.Help, envDef.Labels, nil),
 		},
 	}
-	m.registry.MustRegister(m.requests, m.duration, m.createToReady, m.wakeWait, m.buildInfo, m.environments)
+	m.registry.MustRegister(m.requests, m.duration, m.createToReady, m.wakeWait, m.buildInfo, m.environments, m.deadlineFail)
 	for _, o := range []string{WakeOutcomeWoke, WakeOutcomeTimeout, WakeOutcomeError} {
 		m.wakeWait.WithLabelValues(o)
 	}
@@ -261,7 +273,8 @@ func (m *Metrics) InitMethods(info map[string]grpc.ServiceInfo) {
 }
 
 // InitAtespace creates the create_to_ready series of atespace for every
-// status, so the family is visible before the first environment is ready.
+// status, and its deadline_delete_failed series, so the families are visible
+// before the first sample.
 func (m *Metrics) InitAtespace(atespace string) {
 	if m == nil {
 		return
@@ -269,6 +282,7 @@ func (m *Metrics) InitAtespace(atespace string) {
 	for _, s := range []string{ReadyStatusOK, ReadyStatusError, ReadyStatusCrashed, ReadyStatusDeleted} {
 		m.createToReady.WithLabelValues(atespace, s)
 	}
+	m.deadlineFail.WithLabelValues(atespace)
 }
 
 // ObserveCreateToReady records one create_to_ready sample.
@@ -277,6 +291,15 @@ func (m *Metrics) ObserveCreateToReady(atespace, status string, d time.Duration)
 		return
 	}
 	m.createToReady.WithLabelValues(atespace, status).Observe(d.Seconds())
+}
+
+// CountDeadlineDeleteFailed counts one environment of atespace whose delete
+// by deadline the sweep gave up.
+func (m *Metrics) CountDeadlineDeleteFailed(atespace string) {
+	if m == nil {
+		return
+	}
+	m.deadlineFail.WithLabelValues(atespace).Inc()
 }
 
 // ObserveWakeWait records one wake wait with outcome.

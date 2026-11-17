@@ -62,7 +62,8 @@ defer client.Close()
 
 The `Client` lifecycle methods operate on environments. You can `Create` an environment and get an
 `Env` handle. The `Env` struct exposes `ID`, `Info`, and `Atespace` methods. Other lifecycle
-operations include `Get`, `List`, `ServerInfo`, `EnsureImageTemplate`, and `ListPlacementDomains`.
+operations include `Get`, `List`, `SetTimeToLive`, `ServerInfo`, `EnsureImageTemplate`, and
+`ListPlacementDomains`.
 
 ```go
 env, err := client.Create(ctx, &ateenvv1alpha.CreateEnvironmentRequest{Id: "dev1"})
@@ -163,6 +164,30 @@ err := client.Suspend(ctx, envclient.DefaultAtespace, "dev1")
 if err != nil {
 	panic(err)
 }
+```
+
+## Give an environment a deadline
+
+Set `TimeToLive` in the request of `Create`: the server deletes the environment after its create
+time plus that value, in any status, also while it is suspended. `SetTimeToLive`, on `Client` and on
+`Env`, moves the deadline, counted from the call, and removes it with zero. `Get` reports the
+deadline as `ExpireTime`. The server must run with the environment store
+(`--environment-store=configmaps`, feature `time_to_live` in `ServerInfo`). Without it, a time to
+live fails with `ErrFailedPrecondition` and nothing is created or changed.
+
+```go
+env, err := client.Create(ctx, &ateenvv1alpha.CreateEnvironmentRequest{
+	Id:         "dev2",
+	TimeToLive: durationpb.New(5 * time.Minute),
+})
+if err != nil {
+	panic(err)
+}
+info, err := env.SetTimeToLive(ctx, time.Hour) // one hour from now
+if err != nil {
+	panic(err)
+}
+fmt.Println(info.GetExpireTime().AsTime())
 ```
 
 ## Warm the nodes of a worker pool before a run

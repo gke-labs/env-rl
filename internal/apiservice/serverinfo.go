@@ -46,6 +46,11 @@ const (
 	FeaturePlacementDomains = "placement_domains"
 	// FeatureWarmImage: WarmImage is served.
 	FeatureWarmImage = "warm_image"
+	// FeatureTimeToLive: the server runs with the environment store, thus
+	// CreateEnvironment accepts time_to_live, SetEnvironmentTimeToLive is
+	// served, and the server deletes an environment after its deadline.
+	// Without the name, both are refused with FailedPrecondition.
+	FeatureTimeToLive = "time_to_live"
 )
 
 const substrateModule = "go.ate.dev/substrate"
@@ -79,6 +84,9 @@ func (s *Server) features() []string {
 	f := []string{FeatureRootfsImage, FeaturePTY, FeatureSuspendMode, FeatureImageStatus, FeaturePlacementDomains, FeatureWarmImage}
 	if s.Info.PortProxy {
 		f = append(f, FeaturePortProxy)
+	}
+	if s.Store != nil {
+		f = append(f, FeatureTimeToLive)
 	}
 	return f
 }

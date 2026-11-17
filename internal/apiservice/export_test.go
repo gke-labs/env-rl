@@ -64,3 +64,10 @@ func SetWarmLateCreateSettle(t *testing.T, d time.Duration) {
 	warmLateCreateSettle.Store(d)
 	t.Cleanup(func() { warmLateCreateSettle.Store(old) })
 }
+
+// DeadlineDeleteTries and DeadlineTryInterval are the limits of the deadline
+// sweep, for its tests.
+const (
+	DeadlineDeleteTries = deadlineDeleteTries
+	DeadlineTryInterval = deadlineTryInterval
+)

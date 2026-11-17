@@ -594,6 +594,14 @@ func (c *Client) suspend(ctx context.Context, atespace, id string, mode ateapipb
 // Delete removes the actor with ID in atespace permanently, in any state.
 // If atespace is empty, DefaultAtespace is used.
 func (c *Client) Delete(ctx context.Context, atespace, id string) error {
+	return c.DeleteWithUID(ctx, atespace, id, "")
+}
+
+// DeleteWithUID deletes the actor with ID in atespace as Delete does, and
+// only when it still has that uid: for another actor of the name, created
+// since the caller read the uid, Substrate refuses the delete with Aborted
+// and the actor stays. An empty uid sends no precondition.
+func (c *Client) DeleteWithUID(ctx context.Context, atespace, id, uid string) error {
 	// Delete calls DeleteActor directly; ate-env requires Substrate v0.6.0 or
 	// later. There, DeleteActor takes an actor in any state: it marks the
 	// actor DELETING, terminates the workload, releases the worker and
@@ -601,7 +609,11 @@ func (c *Client) Delete(ctx context.Context, atespace, id string) error {
 	// actors, thus Delete suspended first. That suspend gave the workload no
 	// graceful stop, its snapshot was deleted right away, and Substrate
 	// rejects it for a CRASHED actor, which then could not be deleted.
-	_, err := c.control.DeleteActor(ctx, &ateapipb.DeleteActorRequest{Actor: c.ref(atespace, id)})
+	req := &ateapipb.DeleteActorRequest{Actor: c.ref(atespace, id)}
+	if uid != "" {
+		req.Options = &ateapipb.DeleteOptions{Uid: uid}
+	}
+	_, err := c.control.DeleteActor(ctx, req)
 	if err != nil {
 		return fmt.Errorf("actor: deleting %q: %w", id, wrapGRPCError(err))
 	}

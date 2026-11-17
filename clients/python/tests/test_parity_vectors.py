@@ -181,6 +181,7 @@ SHARED_SPAN_OPERATIONS = {
     "create_environment",
     "get_environment",
     "list_environments",
+    "set_environment_time_to_live",
     "suspend_environment",
     "delete_environment",
     "get_server_info",
@@ -274,6 +275,9 @@ async def test_spans_parity(v, spans, fake_stack):
         await client.get(id_val, **atespace_kw)
     elif op == "list_environments":
         await client.list_environments(**atespace_kw)
+    elif op == "set_environment_time_to_live":
+        fake_stack[1].environments.time_to_live = True
+        await client.set_time_to_live(id_val, 60, **atespace_kw)
     elif op == "suspend_environment":
         await client.suspend(id_val, **atespace_kw)
     elif op == "delete_environment":

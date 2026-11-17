@@ -38,16 +38,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	EnvironmentService_CreateEnvironment_FullMethodName    = "/ateenv.v1alpha.EnvironmentService/CreateEnvironment"
-	EnvironmentService_GetEnvironment_FullMethodName       = "/ateenv.v1alpha.EnvironmentService/GetEnvironment"
-	EnvironmentService_ListEnvironments_FullMethodName     = "/ateenv.v1alpha.EnvironmentService/ListEnvironments"
-	EnvironmentService_SuspendEnvironment_FullMethodName   = "/ateenv.v1alpha.EnvironmentService/SuspendEnvironment"
-	EnvironmentService_DeleteEnvironment_FullMethodName    = "/ateenv.v1alpha.EnvironmentService/DeleteEnvironment"
-	EnvironmentService_GetServerInfo_FullMethodName        = "/ateenv.v1alpha.EnvironmentService/GetServerInfo"
-	EnvironmentService_GetImageStatus_FullMethodName       = "/ateenv.v1alpha.EnvironmentService/GetImageStatus"
-	EnvironmentService_EnsureImageTemplate_FullMethodName  = "/ateenv.v1alpha.EnvironmentService/EnsureImageTemplate"
-	EnvironmentService_ListPlacementDomains_FullMethodName = "/ateenv.v1alpha.EnvironmentService/ListPlacementDomains"
-	EnvironmentService_WarmImage_FullMethodName            = "/ateenv.v1alpha.EnvironmentService/WarmImage"
+	EnvironmentService_CreateEnvironment_FullMethodName        = "/ateenv.v1alpha.EnvironmentService/CreateEnvironment"
+	EnvironmentService_GetEnvironment_FullMethodName           = "/ateenv.v1alpha.EnvironmentService/GetEnvironment"
+	EnvironmentService_ListEnvironments_FullMethodName         = "/ateenv.v1alpha.EnvironmentService/ListEnvironments"
+	EnvironmentService_SuspendEnvironment_FullMethodName       = "/ateenv.v1alpha.EnvironmentService/SuspendEnvironment"
+	EnvironmentService_DeleteEnvironment_FullMethodName        = "/ateenv.v1alpha.EnvironmentService/DeleteEnvironment"
+	EnvironmentService_SetEnvironmentTimeToLive_FullMethodName = "/ateenv.v1alpha.EnvironmentService/SetEnvironmentTimeToLive"
+	EnvironmentService_GetServerInfo_FullMethodName            = "/ateenv.v1alpha.EnvironmentService/GetServerInfo"
+	EnvironmentService_GetImageStatus_FullMethodName           = "/ateenv.v1alpha.EnvironmentService/GetImageStatus"
+	EnvironmentService_EnsureImageTemplate_FullMethodName      = "/ateenv.v1alpha.EnvironmentService/EnsureImageTemplate"
+	EnvironmentService_ListPlacementDomains_FullMethodName     = "/ateenv.v1alpha.EnvironmentService/ListPlacementDomains"
+	EnvironmentService_WarmImage_FullMethodName                = "/ateenv.v1alpha.EnvironmentService/WarmImage"
 )
 
 // EnvironmentServiceClient is the client API for EnvironmentService service.
@@ -72,6 +73,12 @@ type EnvironmentServiceClient interface {
 	SuspendEnvironment(ctx context.Context, in *SuspendEnvironmentRequest, opts ...grpc.CallOption) (*SuspendEnvironmentResponse, error)
 	// DeleteEnvironment permanently removes an environment and its associated resources.
 	DeleteEnvironment(ctx context.Context, in *DeleteEnvironmentRequest, opts ...grpc.CallOption) (*DeleteEnvironmentResponse, error)
+	// SetEnvironmentTimeToLive gives an environment a new deadline, counted
+	// from the time the server handles the call, or removes its deadline. The
+	// server deletes an environment after its deadline, in any status. The
+	// call needs the environment store (GetServerInfo lists "time_to_live");
+	// without it the call is FAILED_PRECONDITION and changes nothing.
+	SetEnvironmentTimeToLive(ctx context.Context, in *SetEnvironmentTimeToLiveRequest, opts ...grpc.CallOption) (*SetEnvironmentTimeToLiveResponse, error)
 	// GetServerInfo reports which server implementation answers, its version, and
 	// the optional features it serves, so a client can check them before it
 	// depends on them.
@@ -165,6 +172,16 @@ func (c *environmentServiceClient) DeleteEnvironment(ctx context.Context, in *De
 	return out, nil
 }
 
+func (c *environmentServiceClient) SetEnvironmentTimeToLive(ctx context.Context, in *SetEnvironmentTimeToLiveRequest, opts ...grpc.CallOption) (*SetEnvironmentTimeToLiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetEnvironmentTimeToLiveResponse)
+	err := c.cc.Invoke(ctx, EnvironmentService_SetEnvironmentTimeToLive_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *environmentServiceClient) GetServerInfo(ctx context.Context, in *GetServerInfoRequest, opts ...grpc.CallOption) (*GetServerInfoResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetServerInfoResponse)
@@ -246,6 +263,12 @@ type EnvironmentServiceServer interface {
 	SuspendEnvironment(context.Context, *SuspendEnvironmentRequest) (*SuspendEnvironmentResponse, error)
 	// DeleteEnvironment permanently removes an environment and its associated resources.
 	DeleteEnvironment(context.Context, *DeleteEnvironmentRequest) (*DeleteEnvironmentResponse, error)
+	// SetEnvironmentTimeToLive gives an environment a new deadline, counted
+	// from the time the server handles the call, or removes its deadline. The
+	// server deletes an environment after its deadline, in any status. The
+	// call needs the environment store (GetServerInfo lists "time_to_live");
+	// without it the call is FAILED_PRECONDITION and changes nothing.
+	SetEnvironmentTimeToLive(context.Context, *SetEnvironmentTimeToLiveRequest) (*SetEnvironmentTimeToLiveResponse, error)
 	// GetServerInfo reports which server implementation answers, its version, and
 	// the optional features it serves, so a client can check them before it
 	// depends on them.
@@ -303,6 +326,9 @@ func (UnimplementedEnvironmentServiceServer) SuspendEnvironment(context.Context,
 }
 func (UnimplementedEnvironmentServiceServer) DeleteEnvironment(context.Context, *DeleteEnvironmentRequest) (*DeleteEnvironmentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteEnvironment not implemented")
+}
+func (UnimplementedEnvironmentServiceServer) SetEnvironmentTimeToLive(context.Context, *SetEnvironmentTimeToLiveRequest) (*SetEnvironmentTimeToLiveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetEnvironmentTimeToLive not implemented")
 }
 func (UnimplementedEnvironmentServiceServer) GetServerInfo(context.Context, *GetServerInfoRequest) (*GetServerInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetServerInfo not implemented")
@@ -430,6 +456,24 @@ func _EnvironmentService_DeleteEnvironment_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EnvironmentService_SetEnvironmentTimeToLive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetEnvironmentTimeToLiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnvironmentServiceServer).SetEnvironmentTimeToLive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EnvironmentService_SetEnvironmentTimeToLive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnvironmentServiceServer).SetEnvironmentTimeToLive(ctx, req.(*SetEnvironmentTimeToLiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _EnvironmentService_GetServerInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetServerInfoRequest)
 	if err := dec(in); err != nil {
@@ -539,6 +583,10 @@ var EnvironmentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteEnvironment",
 			Handler:    _EnvironmentService_DeleteEnvironment_Handler,
+		},
+		{
+			MethodName: "SetEnvironmentTimeToLive",
+			Handler:    _EnvironmentService_SetEnvironmentTimeToLive_Handler,
 		},
 		{
 			MethodName: "GetServerInfo",

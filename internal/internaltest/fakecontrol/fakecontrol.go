@@ -1048,6 +1048,11 @@ func (s *Server) DeleteActor(ctx context.Context, req *ateapipb.DeleteActorReque
 	if err != nil {
 		return nil, err
 	}
+	// Substrate's uid precondition: the delete of an actor that is not the
+	// one the caller read is refused, and the actor stays.
+	if uid := req.GetOptions().GetUid(); uid != "" && uid != a.GetMetadata().GetUid() {
+		return nil, status.Errorf(codes.Aborted, "Actor %s does not have uid %s", ref.GetName(), uid)
+	}
 	if err := s.failDeletes.take(); err != nil {
 		return nil, err
 	}

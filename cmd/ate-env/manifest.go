@@ -564,7 +564,7 @@ the "template" subcommand: ate-env manifest template`,
 	cmd.Flags().Int32Var(&mCfg.apiPort, "api-port", 7777, "port the ate-env-api service listens on")
 	cmd.Flags().StringVar(&mCfg.authTokenSecret, "auth-token-secret", defaultAuthTokenSecret, "Kubernetes Secret (key 'token') mounted into ate-env-api; its value is the bearer token ate-env-api requires from callers. Create it with 'ate-env manifest auth-secret'")
 	cmd.Flags().BoolVar(&mCfg.insecureNoAuth, "insecure-no-auth", false, "deploy ate-env-api without a caller token: anyone who can reach its Service can create environments, run commands in them and reach their ports")
-	cmd.Flags().BoolVar(&mCfg.environmentMetadata, "environment-metadata", false, "let ate-env-api keep the labels and the deadline of an environment, which Substrate has no field for, in one ConfigMap for each such environment in its namespace (--environment-store=configmaps). This gives ate-env-api what it does not have by default: the Kubernetes API token in its pod, and a Role to list, watch, create and delete the ConfigMaps of the namespace. Limits: docs/security/threat-model.md")
+	cmd.Flags().BoolVar(&mCfg.environmentMetadata, "environment-metadata", false, "let ate-env-api keep the labels and the deadline of an environment, which Substrate has no field for, in one ConfigMap for each such environment in its namespace (--environment-store=configmaps). This gives ate-env-api what it does not have by default: the Kubernetes API token in its pod, and a Role to list, watch, create, update and delete the ConfigMaps of the namespace. Limits: docs/security/threat-model.md")
 	cmd.Flags().StringVar(&mCfg.portProxyAtespaces, "port-proxy-atespaces", "", "comma-separated atespaces whose environments ate-env-api's port proxy forwards to, or * for any (defaults to ate-env)")
 	cmd.Flags().StringVar(&mCfg.portProxyHostSuffix, "port-proxy-host-suffix", "", "domain of two labels or more that turns on the hostname form of ate-env-api's port proxy: <port>-<id>.<domain> and <port>-<id>.<atespace>.<domain> reach an environment port; the manifest renders no Ingress, DNS record or certificate for it (off when empty)")
 	cmd.Flags().StringSliceVar(&mCfg.allowedHosts, "api-allowed-hosts", nil, "extra host names that HTTP clients may use to reach ate-env-api, e.g. an internal load balancer name (a leading *. allows the names below it); the Service's in-cluster names, in the cluster's own DNS domain, IP addresses and localhost are always allowed")
@@ -806,8 +806,9 @@ func buildEnvironmentStoreRole(cfg manifestConfig) (*rbacv1.Role, *rbacv1.RoleBi
 			APIGroups: []string{""},
 			Resources: []string{"configmaps"},
 			// The calls internal/envstore makes (envstore.Verbs), and no
-			// other: it reads from its informer and never updates an object.
-			Verbs: []string{"list", "watch", "create", "delete"},
+			// other: it reads from its informer and from a list of one name,
+			// thus it never gets an object.
+			Verbs: []string{"list", "watch", "create", "update", "delete"},
 		}},
 	}
 	binding := &rbacv1.RoleBinding{

@@ -88,13 +88,35 @@ user needs to know across them.
   ConfigMaps of the namespace, and the Kubernetes API token in the pod). It
   is where the labels and the deadline of an environment go, which Substrate
   has no field for: one ConfigMap for each such environment. This release has
-  the store, the delete of the object with its environment, and a sweep that
-  removes an object whose actor is gone or has another uid. No API field
-  writes labels or a deadline yet. The Role grants `list`, `watch`, `create`
-  and `delete`, the calls the store makes. The store's Kubernetes client has
+  the store, the delete of the object with its environment, a sweep that
+  removes an object whose actor is gone or has another uid, and the time to
+  live (the next entry). No API field writes labels yet. The Role grants
+  `list`, `watch`, `create`, `update` and `delete`, the calls the store
+  makes. The store's Kubernetes client has
   a rate limit of its own, `--environment-store-qps` (default 50) and
   `--environment-store-burst` (default 100), not the 5 per second of
   client-go's default.
+- A time to live on an environment (#386), with the environment store on.
+  `CreateEnvironmentRequest.time_to_live` gives an environment a deadline,
+  its create time plus the value, and the new
+  `EnvironmentService.SetEnvironmentTimeToLive` moves the deadline, counted
+  from the call, or removes it with zero. `Environment.expire_time` reports
+  the deadline on create, get and list. Each `ate-env-api` replica deletes
+  the environments whose deadline is past, every 30 s, in any status, also
+  suspended ones. Without `--environment-store=configmaps` a time to live is
+  refused with `FailedPrecondition` and nothing is created or changed;
+  `GetServerInfo` lists the feature `time_to_live` when it is on. An
+  environment that never had a time to live has no ConfigMap and costs no
+  call to Kubernetes. One sweep deletes 16 environments at a time for 30 s;
+  a larger backlog is deleted by the next sweeps. A delete by deadline that
+  Substrate refuses (`FailedPrecondition`) 5 times stops: the environment is
+  not deleted, its ConfigMap gets the label
+  `ate-env.dev/deadline=failed`, and one log line and the new counter
+  `ate_env_api_deadline_delete_failed_total` report it. Go:
+  `Client.SetTimeToLive`, `Env.SetTimeToLive`, and `TimeToLive` in the
+  request of `Client.Create`. Python: `create(time_to_live=...)`,
+  `Client.set_time_to_live`, `Env.set_time_to_live` and
+  `EnvironmentInfo.expire_time`. `ate_env_e2b` does not use it yet.
 - `examples/e2b-envd-layer`: an E2B-compatible sandbox from any image, with
   upstream envd as an added runtime layer. `demo.sh` builds the layer,
   registers the base template and runs an E2B SDK program on two images.

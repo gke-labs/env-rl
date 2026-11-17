@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // DefaultAtespace is the atespace ate-env-api uses for an environment when
@@ -62,7 +63,8 @@ type ClientOptions struct {
 	// TracerProvider, when set, makes the client emit OpenTelemetry spans
 	// named "<TraceServiceName>.<operation>" (create_environment,
 	// get_environment, list_environments, suspend_environment,
-	// delete_environment, get_server_info, get_image_status,
+	// delete_environment, set_environment_time_to_live, get_server_info,
+	// get_image_status,
 	// ensure_image_template, list_placement_domains, warm_image,
 	// start_process, exec, read_file, write_file) with ate.* / ate_env.* attributes, the same as the Python
 	// client's, and send their W3C trace context to ate-env-api so its spans
@@ -378,6 +380,35 @@ func (c *Client) delete(ctx context.Context, cn *conn, atespace, id string) (err
 		return fromGRPCError(err)
 	}
 	return nil
+}
+
+// SetTimeToLive gives the environment a new deadline, the time the server
+// handles the call plus ttl, and returns the environment with that deadline
+// in ExpireTime. Zero removes the deadline. The server deletes an environment
+// after its deadline, in any status, also while it is suspended. A negative
+// ttl is codes.InvalidArgument, and an environment that does not exist
+// codes.NotFound. A server that runs without the environment store answers
+// codes.FailedPrecondition and changes nothing; check ServerInfo's features
+// for "time_to_live" first. A server that predates the RPC answers
+// codes.Unimplemented. To give an environment a deadline from its
+// start, set TimeToLive in the request of Create.
+func (c *Client) SetTimeToLive(ctx context.Context, atespace, id string, ttl time.Duration) (*ateenvv1alpha.Environment, error) {
+	return c.setTimeToLive(ctx, c.pick(), atespace, id, ttl)
+}
+
+func (c *Client) setTimeToLive(ctx context.Context, cn *conn, atespace, id string, ttl time.Duration) (_ *ateenvv1alpha.Environment, err error) {
+	ctx, span := c.tracer.startRPC(ctx, opSetEnvironmentTimeToLive, "SetEnvironmentTimeToLive", AttrActorName.String(id), AttrAtespace.String(atespace))
+	defer func() { endSpan(span, err) }()
+	req := &ateenvv1alpha.SetEnvironmentTimeToLiveRequest{
+		Id:         id,
+		Atespace:   atespace,
+		TimeToLive: durationpb.New(ttl),
+	}
+	resp, err := cn.env.SetEnvironmentTimeToLive(c.withAuth(ctx), req)
+	if err != nil {
+		return nil, fromGRPCError(err)
+	}
+	return resp.GetEnvironment(), nil
 }
 
 // ServerInfo returns the server implementation, its version, the Substrate

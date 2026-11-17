@@ -451,6 +451,7 @@ func TestSpansParity(t *testing.T) {
 	}
 
 	f := newTracingFixture(t)
+	storeOn(t, f.service) // set_environment_time_to_live needs the store
 	f.serveGuest(t, "traced")
 	labels := map[string]string{"workload": "default-env", "ate-env/domain": "d0"}
 	f.control.AddWorker(fakecontrol.Worker("ate-system", "pool-d0", "node-1", labels, 8))
@@ -527,6 +528,8 @@ func TestSpansParity(t *testing.T) {
 				_, err = c.Get(ctx, atespace, id)
 			case "list_environments":
 				_, err = c.List(ctx, &ateenvv1alpha.ListEnvironmentsRequest{Atespace: atespace})
+			case "set_environment_time_to_live":
+				_, err = c.SetTimeToLive(ctx, atespace, id, time.Minute)
 			case "suspend_environment":
 				err = c.Suspend(ctx, atespace, id)
 			case "delete_environment":
