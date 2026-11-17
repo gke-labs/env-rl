@@ -176,9 +176,12 @@ when one does.
   most of them with an empty page. EM-G, decided: a list with a label selector does not page over
   Substrate's actors. It takes the ids of the matching objects from the informer, in the order of
   the ids, and reads those actors from Substrate, one page of ids for each call. Its cost follows
-  the number of matches. Its page token is its own (the last id of the page), not Substrate's, and
-  an environment whose object the informer does not have yet is not in the list (EM-D). The status
-  filter applies to the actors it read.
+  the number of matches: `page_size` has the rule of `AE-7`, and one call reads at most that number
+  of actors. Its page token is its own, not Substrate's: the last id that the call took from the
+  informer, and empty when no matching id comes after it. An id whose actor is gone, or has another
+  uid than the object, is skipped: the object is an orphan. An environment whose object the informer
+  does not have yet is not in the list (EM-D). The status filter applies to the actors it read, thus
+  a page can be short, or empty with a token.
 - The switch is one for the server, and it turns on labels and the time to live together. With the
   proposal of EM-B, it also changes callers that use neither: today `ate_env_e2b` gives an
   environment of a `Sandbox.create()` with no `timeout` no end (and warns only when a `timeout` is
