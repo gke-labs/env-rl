@@ -84,6 +84,21 @@ _INT32_MIN = -(2**31)
 _INT32_MAX = 2**31 - 1
 
 
+def _as_timedelta(value: float | timedelta) -> timedelta:
+    """A duration argument, seconds or a timedelta, as a timedelta.
+
+    A timedelta holds whole microseconds. A positive number of seconds below
+    one microsecond would round to zero, which a time to live reads as "no
+    deadline": it is refused with ValueError.
+    """
+    if isinstance(value, timedelta):
+        return value
+    delta = timedelta(seconds=value)
+    if value > 0 and delta == timedelta(0):
+        raise ValueError(f"a duration of {value!r} s is below one microsecond")
+    return delta
+
+
 def _env_rpc_attrs(method: str, target: str | None) -> dict[str, object]:
     return rpc_attrs(_ENVIRONMENT_SERVICE, method, target)
 
@@ -285,6 +300,7 @@ class Client:
         template_atespace: str | None = None,
         rootfs_image: str | None = None,
         worker_selector: Mapping[str, str] | None = None,
+        time_to_live: float | timedelta | None = None,
     ) -> Env:
         """Register and start a new environment; returns a handle to it.
 
@@ -303,10 +319,24 @@ class Client:
         narrows the pools the environment can run on and never widens them;
         it also applies to the environment's later wakes. get() reports it,
         with the node the environment runs on.
+
+        time_to_live (seconds or timedelta) gives the environment a deadline,
+        its create time plus the value: the server deletes the environment
+        after it, in any status, also while it is suspended. get() reports
+        the deadline as ``expire_time``, and ``set_time_to_live`` moves or
+        removes it. None or zero means no deadline, and a negative value is
+        refused (``InvalidArgumentError``). A server that runs without the
+        environment store refuses a time to live (``FailedPreconditionError``)
+        and creates nothing: check ``server_info()`` for the feature
+        ``time_to_live`` first. A server that predates the field refuses it
+        with ``InvalidArgumentError``. A positive number of seconds below one
+        microsecond raises ``ValueError``.
         """
         req = env_pb2.CreateEnvironmentRequest(
             id=id, atespace=atespace, rootfs_image=rootfs_image or ""
         )
+        if time_to_live is not None and _as_timedelta(time_to_live) != timedelta(0):
+            req.time_to_live.FromTimedelta(_as_timedelta(time_to_live))
         if worker_selector:
             req.worker_selector.update(worker_selector)
         if template_name or template_atespace:
@@ -484,6 +514,45 @@ class Client:
                     )
             except grpc.RpcError as e:
                 raise map_rpc_error(e) from e
+
+    async def set_time_to_live(
+        self,
+        id: str,
+        time_to_live: float | timedelta | None,
+        *,
+        atespace: str = DEFAULT_ATESPACE,
+    ) -> EnvironmentInfo:
+        """Give an environment a new deadline, or remove its deadline.
+
+        The new deadline is the time the server handles the call plus
+        ``time_to_live`` (seconds or timedelta); None or zero removes the
+        deadline. The server deletes an environment after its deadline, in
+        any status, also while it is suspended. The call returns the
+        environment with the deadline it wrote in ``expire_time``.
+
+        A negative value is refused (``InvalidArgumentError``), and an
+        environment that does not exist is ``NotFoundError``. A server that
+        runs without the environment store refuses the call
+        (``FailedPreconditionError``) and changes nothing: check
+        ``server_info()`` for the feature ``time_to_live`` first. A server
+        that predates the RPC answers ``RpcError`` with the code
+        ``UNIMPLEMENTED``. A positive number of seconds below one microsecond
+        raises ``ValueError``.
+        """
+        req = env_pb2.SetEnvironmentTimeToLiveRequest(id=id, atespace=atespace)
+        req.time_to_live.FromTimedelta(_as_timedelta(time_to_live or 0))
+        with self._rpc_span(
+            "set_environment_time_to_live",
+            "SetEnvironmentTimeToLive",
+            lambda: {"ate.actor.name": id, "ate.atespace": atespace},
+        ):
+            try:
+                resp = await self._environments.SetEnvironmentTimeToLive(
+                    req, metadata=self._auth_metadata()
+                )
+            except grpc.RpcError as e:
+                raise map_rpc_error(e) from e
+        return _environment_info_from_pb(resp.environment)
 
     async def server_info(self) -> ServerInfo:
         """Return the server's implementation, version and optional features.

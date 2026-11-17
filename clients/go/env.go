@@ -102,6 +102,12 @@ func (e *Env) Delete(ctx context.Context) error {
 	return e.client.delete(ctx, e.conn, e.atespace, e.id)
 }
 
+// SetTimeToLive gives the environment a new deadline, counted from the call,
+// or removes it with zero; see Client.SetTimeToLive.
+func (e *Env) SetTimeToLive(ctx context.Context, ttl time.Duration) (*ateenvv1alpha.Environment, error) {
+	return e.client.setTimeToLive(ctx, e.conn, e.atespace, e.id, ttl)
+}
+
 // Shell runs a shell command line inside the environment and captures its
 // output. It is shorthand for Run with only Command set.
 func (e *Env) Shell(ctx context.Context, commandLine string) (*ShellResponse, error) {

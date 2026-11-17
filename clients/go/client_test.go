@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/agent-substrate/env/guest"
 	"github.com/agent-substrate/env/internal/apiservice"
 	"github.com/agent-substrate/env/internal/ate"
+	"github.com/agent-substrate/env/internal/envstore"
 	"github.com/agent-substrate/env/internal/internaltest/fakecontrol"
 	"github.com/agent-substrate/env/internal/internaltest/fakerouter"
 	"github.com/agent-substrate/env/internal/mcp"
@@ -44,6 +47,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 // fixture runs the full stack the SDK talks to: a fake Substrate control
@@ -272,6 +282,99 @@ func TestList(t *testing.T) {
 
 	if _, err := f.client.List(ctx, &ateenvv1alpha.ListEnvironmentsRequest{PageSize: -1}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("List(page_size=-1): got %v, want InvalidArgument", err)
+	}
+}
+
+// storeOn turns on the environment store of a fixture's ate-env-api, on a
+// fake Kubernetes that gives each object the identity the API server gives.
+func storeOn(t *testing.T, service *apiservice.Server) *envstore.Store {
+	t.Helper()
+	kube := fake.NewSimpleClientset()
+	var n atomic.Int64
+	kube.PrependReactor("create", "configmaps", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		cm := action.(k8stesting.CreateAction).GetObject().(*corev1.ConfigMap)
+		cm.UID, cm.ResourceVersion, cm.CreationTimestamp = types.UID(fmt.Sprintf("object-%d", n.Add(1))), "1", metav1.Now()
+		return false, nil, nil
+	})
+	store := envstore.New(kube.CoreV1().ConfigMaps("ate-env"), "ate-env")
+	if err := store.Run(t.Context(), 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	service.Store = store
+	return store
+}
+
+// TestTimeToLive checks the client side of EM-9, EM-10 and EM-1: a create
+// with TimeToLive gives the environment a deadline that Get reports,
+// SetTimeToLive moves it, counted from the call, and removes it with zero,
+// and a server without the environment store refuses both with
+// FailedPrecondition.
+func TestTimeToLive(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+
+	// The server runs without the store.
+	if _, err := f.client.Create(ctx, &ateenvv1alpha.CreateEnvironmentRequest{Id: "sb-off", Atespace: "envs", TimeToLive: durationpb.New(time.Minute)}); !errors.Is(err, env.ErrFailedPrecondition) {
+		t.Errorf("Create with TimeToLive, store off: got %v, want ErrFailedPrecondition", err)
+	}
+	plain := f.create(t, "sb-plain")
+	if _, err := plain.SetTimeToLive(ctx, time.Minute); !errors.Is(err, env.ErrFailedPrecondition) {
+		t.Errorf("SetTimeToLive, store off: got %v, want ErrFailedPrecondition", err)
+	}
+
+	store := storeOn(t, f.service)
+	informed := func(want func(envstore.Record, bool) bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			r, ok, err := store.Get("envs", "sb-ttl")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want(r, ok) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the informer did not reach the wanted state; last %+v, %v", r, ok)
+			}
+		}
+	}
+
+	info, err := f.client.ServerInfo(ctx)
+	if err != nil || !slices.Contains(info.GetFeatures(), "time_to_live") {
+		t.Fatalf("ServerInfo features = %v, %v, want time_to_live", info.GetFeatures(), err)
+	}
+	e, err := f.client.Create(ctx, &ateenvv1alpha.CreateEnvironmentRequest{Id: "sb-ttl", Atespace: "envs", TimeToLive: durationpb.New(time.Minute)})
+	if err != nil {
+		t.Fatalf("Create with TimeToLive: %v", err)
+	}
+	informed(func(_ envstore.Record, ok bool) bool { return ok })
+	got, err := e.Info(ctx)
+	if err != nil || got.GetExpireTime() == nil || !got.GetExpireTime().AsTime().Equal(got.GetCreateTime().AsTime().Add(time.Minute)) {
+		t.Fatalf("Info: expire_time = %v, create_time = %v, %v; want the create time plus one minute", got.GetExpireTime(), got.GetCreateTime(), err)
+	}
+
+	before := time.Now()
+	moved, err := f.client.SetTimeToLive(ctx, "envs", "sb-ttl", time.Hour)
+	if err != nil {
+		t.Fatalf("SetTimeToLive: %v", err)
+	}
+	if at := moved.GetExpireTime().AsTime(); moved.GetId() != "sb-ttl" || at.Before(before.Add(time.Hour)) || at.After(time.Now().Add(time.Hour)) {
+		t.Errorf("SetTimeToLive = %v, want sb-ttl with a deadline one hour after the call", moved)
+	}
+	cleared, err := e.SetTimeToLive(ctx, 0)
+	if err != nil || cleared.GetExpireTime() != nil {
+		t.Errorf("SetTimeToLive(0) = %v, %v, want no expire_time", cleared, err)
+	}
+	informed(func(r envstore.Record, ok bool) bool { return ok && r.ExpireTime.IsZero() })
+	if got, err := e.Info(ctx); err != nil || got.GetExpireTime() != nil {
+		t.Errorf("Info after the deadline was removed: expire_time = %v, %v", got.GetExpireTime(), err)
+	}
+
+	if _, err := e.SetTimeToLive(ctx, -time.Second); !errors.Is(err, env.ErrInvalidArgument) {
+		t.Errorf("SetTimeToLive(-1s): got %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.client.SetTimeToLive(ctx, "envs", "sb-none", time.Minute); !errors.Is(err, env.ErrNotFound) {
+		t.Errorf("SetTimeToLive of an unknown environment: got %v, want ErrNotFound", err)
 	}
 }
 

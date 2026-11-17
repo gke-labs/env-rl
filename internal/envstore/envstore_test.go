@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -61,6 +63,15 @@ func stampCreates(client *fake.Clientset) {
 		cm.ResourceVersion = strconv.FormatInt(i, 10)
 		if cm.CreationTimestamp.IsZero() {
 			cm.CreationTimestamp = metav1.Now()
+		}
+		return false, nil, nil
+	})
+	client.PrependReactor("update", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		// An update gets a new resource version and keeps the create time.
+		cm := action.(k8stesting.UpdateAction).GetObject().(*corev1.ConfigMap)
+		cm.ResourceVersion = strconv.FormatInt(n.Add(1), 10)
+		if cur, err := client.Tracker().Get(action.GetResource(), cm.Namespace, cm.Name); err == nil {
+			cm.CreationTimestamp = cur.(*corev1.ConfigMap).CreationTimestamp
 		}
 		return false, nil, nil
 	})
@@ -255,10 +266,20 @@ func TestReplaceLeavesAnObjectThatChanged(t *testing.T) {
 // call is a permission ate-env-api does not need.
 func TestTheStoreMakesOnlyTheCallsOfVerbs(t *testing.T) {
 	s, client := newStore(t)
-	// Each path of the store: a first write, a write over an object, a read,
-	// a delete, and a sweep that deletes an orphan and an unreadable object.
+	// Each path of the store: a first write, a write over an object, a
+	// change in place, a read of the informer and of the API server, a
+	// delete, and a sweep that deletes an orphan and an unreadable object.
 	put(t, s, Record{Atespace: "team", ID: "env-1", UID: "uid-1"})
-	put(t, s, Record{Atespace: "team", ID: "env-1", UID: "uid-1", Labels: map[string]string{"run": "a"}})
+	first := put(t, s, Record{Atespace: "team", ID: "env-1", UID: "uid-1", Labels: map[string]string{"run": "a"}})
+	next := first
+	next.ExpireTime = time.Now().Add(time.Hour)
+	if err := s.Update(t.Context(), next, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Read(t.Context(), "team", "env-1"); err != nil {
+		t.Fatal(err)
+	}
+	s.Expired(time.Now())
 	got := put(t, s, Record{Atespace: "team", ID: "env-2", UID: "uid-2"})
 	if err := s.Delete(t.Context(), got); err != nil {
 		t.Fatal(err)
@@ -571,4 +592,189 @@ func TestSweepOrphansReportsAnUnreadableObjectItDidNotDelete(t *testing.T) {
 	if strings.Contains(err.Error(), "the sweep deleted it") || !strings.Contains(err.Error(), "written again") {
 		t.Errorf("report = %q, want that the object was written again and stays, not that the sweep deleted it", err)
 	}
+}
+
+// TestUpdateChangesTheObjectItWasGiven: an update, the write of a new
+// deadline (EM-10) and of the count of failed deletes (EM-15), changes the
+// object in place and names it by uid and resource version, thus the API
+// server refuses it for an object that was written again since. The test
+// checks that the update carries them and what the store does with the
+// refusal, not that Kubernetes refuses.
+func TestUpdateChangesTheObjectItWasGiven(t *testing.T) {
+	s, client := newStore(t)
+	first := put(t, s, Record{Atespace: "team", ID: "env-1", UID: "uid-1", Labels: map[string]string{"run": "a"}})
+
+	var sent []*corev1.ConfigMap
+	answer := error(nil)
+	client.PrependReactor("update", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		sent = append(sent, action.(k8stesting.UpdateAction).GetObject().(*corev1.ConfigMap).DeepCopy())
+		return answer != nil, nil, answer
+	})
+
+	expire := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	next := first
+	next.ExpireTime, next.DeleteFailures, next.LastDeleteFailure = expire, 3, expire.Add(time.Minute)
+	if err := s.Update(t.Context(), next, first); err != nil {
+		t.Fatal(err)
+	}
+	got := waitFor(t, s, "team", "env-1", func(r Record, ok bool) bool { return ok && !r.ExpireTime.IsZero() })
+	if !got.ExpireTime.Equal(expire) || got.DeleteFailures != 3 || !got.LastDeleteFailure.Equal(expire.Add(time.Minute)) || got.DeleteFailed || got.Labels["run"] != "a" || !got.Written.Equal(first.Written) {
+		t.Errorf("after the update: %+v, want the deadline, 3 failures, the labels and the create time of the first write", got)
+	}
+	if len(sent) != 1 || sent[0].UID != first.objectUID || sent[0].ResourceVersion != first.resourceVersion {
+		t.Fatalf("the update sent %+v, want the uid and the resource version of the object it read", sent)
+	}
+
+	// The mark of a delete that failed for good is a label value, and a
+	// record with no deadline has neither the mark nor the count.
+	marked := got
+	marked.DeleteFailures, marked.DeleteFailed = 5, true
+	if err := s.Update(t.Context(), marked, got); err != nil {
+		t.Fatal(err)
+	}
+	got = waitFor(t, s, "team", "env-1", func(r Record, ok bool) bool { return ok && r.DeleteFailed })
+	cm, _ := client.CoreV1().ConfigMaps(testNamespace).Get(t.Context(), ObjectName("team", "env-1"), metav1.GetOptions{})
+	if got.DeleteFailures != 5 || cm.Labels[LabelDeadline] != DeadlineFailed {
+		t.Errorf("marked: %+v, labels %v, want 5 failures and the label value %q", got, cm.Labels, DeadlineFailed)
+	}
+	cleared := got
+	cleared.ExpireTime = time.Time{}
+	if err := s.Update(t.Context(), cleared, got); err != nil {
+		t.Fatal(err)
+	}
+	got = waitFor(t, s, "team", "env-1", func(r Record, ok bool) bool { return ok && r.ExpireTime.IsZero() })
+	if got.DeleteFailed || got.DeleteFailures != 0 || !got.LastDeleteFailure.IsZero() {
+		t.Errorf("with no deadline: %+v, want no mark and no count", got)
+	}
+
+	// As the API server answers for an object that changed, and for none.
+	for _, answer = range []error{
+		apierrors.NewConflict(schema.GroupResource{Resource: "configmaps"}, "x", errors.New("the object has been modified")),
+		apierrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, "x"),
+	} {
+		if err := s.Update(t.Context(), next, got); !errors.Is(err, ErrObjectChanged) {
+			t.Errorf("Update with the answer %v = %v, want ErrObjectChanged", answer, err)
+		}
+	}
+	answer = nil
+
+	// An update is for the object of the same actor. Over the object of
+	// another actor, the new object needs its own create time: Replace.
+	other := got
+	other.UID = "uid-2"
+	before := len(sent)
+	if err := s.Update(t.Context(), other, got); err == nil || len(sent) != before {
+		t.Errorf("Update to another actor = %v after %d calls, want an error and no call", err, len(sent)-before)
+	}
+	if err := s.Update(t.Context(), next, Record{Atespace: "team", ID: "env-1", UID: "uid-1"}); err == nil {
+		t.Error("Update over a record that the store did not read = nil, want an error")
+	}
+}
+
+// TestReadReturnsTheCopyOfTheAPIServer checks the read of EM-F: Read gives
+// the object as the API server has it, also when the informer is behind.
+// The informer of the test gets only the events the test sends it.
+func TestReadReturnsTheCopyOfTheAPIServer(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	stampCreates(client)
+	events := watch.NewFakeWithChanSize(10, false)
+	client.PrependWatchReactor("configmaps", func(k8stesting.Action) (bool, watch.Interface, error) {
+		return true, events, nil
+	})
+	s := New(client.CoreV1().ConfigMaps(testNamespace), testNamespace)
+	if err := s.Run(t.Context(), 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := s.Read(t.Context(), "team", "env-1"); found || err != nil {
+		t.Fatalf("Read with no object = %v, %v, want not found", found, err)
+	}
+
+	early := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	if err := s.Put(t.Context(), Record{Atespace: "team", ID: "env-1", UID: "uid-1", ExpireTime: early}); err != nil {
+		t.Fatal(err)
+	}
+	cm, err := client.CoreV1().ConfigMaps(testNamespace).Get(t.Context(), ObjectName("team", "env-1"), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events.Add(cm)
+	seen := waitFor(t, s, "team", "env-1", func(_ Record, ok bool) bool { return ok })
+
+	// A write whose event the informer does not get: a write of another
+	// replica that this one has not seen yet.
+	next := seen
+	next.ExpireTime = early.Add(time.Hour)
+	if err := s.Update(t.Context(), next, seen); err != nil {
+		t.Fatal(err)
+	}
+	fresh, found, err := s.Read(t.Context(), "team", "env-1")
+	if err != nil || !found || !fresh.ExpireTime.Equal(early.Add(time.Hour)) || fresh.UID != "uid-1" {
+		t.Errorf("Read = %+v, %v, %v, want the deadline of the write", fresh, found, err)
+	}
+	if stale, _, _ := s.Get("team", "env-1"); !stale.ExpireTime.Equal(early) {
+		t.Errorf("the informer has the deadline %s, want the one before the write: the test does not check a late informer", stale.ExpireTime)
+	}
+	// The record of Read names the object for a later write.
+	again := fresh
+	again.DeleteFailures = 1
+	if err := s.Update(t.Context(), again, fresh); err != nil {
+		t.Errorf("Update over the record of Read = %v", err)
+	}
+
+	client.PrependReactor("list", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("the Kubernetes API is down")
+	})
+	if _, _, err := s.Read(t.Context(), "team", "env-1"); err == nil {
+		t.Error("Read with the API down = nil, want the error: a sweep must not read it as no object")
+	}
+}
+
+// TestExpiredListsTheObjectsPastTheirDeadline: the list of the deadline
+// sweep (EM-9) holds the objects whose deadline is at or before now, and not
+// one with no deadline, with a later one, or with the mark of EM-15.
+func TestExpiredListsTheObjectsPastTheirDeadline(t *testing.T) {
+	s, _ := newStore(t)
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	put(t, s, Record{Atespace: "team", ID: "past", UID: "uid-1", ExpireTime: now.Add(-time.Second), DeleteFailures: 2})
+	put(t, s, Record{Atespace: "team", ID: "now", UID: "uid-2", ExpireTime: now})
+	put(t, s, Record{Atespace: "other", ID: "later", UID: "uid-3", ExpireTime: now.Add(time.Second)})
+	put(t, s, Record{Atespace: "team", ID: "none", UID: "uid-4", Labels: map[string]string{"run": "a"}})
+	put(t, s, Record{Atespace: "team", ID: "failed", UID: "uid-5", ExpireTime: now.Add(-time.Hour), DeleteFailures: 5, DeleteFailed: true})
+
+	var got []string
+	for _, r := range s.Expired(now) {
+		got = append(got, fmt.Sprintf("%s/%s/%s/%d", r.Atespace, r.ID, r.UID, r.DeleteFailures))
+	}
+	slices.Sort(got)
+	if want := []string{"team/now/uid-2/0", "team/past/uid-1/2"}; !slices.Equal(got, want) {
+		t.Errorf("Expired = %v, want %v", got, want)
+	}
+	if got := s.Expired(now.Add(time.Second)); len(got) != 3 {
+		t.Errorf("Expired one second later = %d records, want 3", len(got))
+	}
+}
+
+// TestRunSweepSweepsOnEachInterval checks the timer of EM-9: RunSweep calls
+// the sweep once for each interval, with the time of the tick, and stops
+// when its context ends. The clock is synctest's.
+func TestRunSweepSweepsOnEachInterval(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		start := time.Now()
+		var at []time.Duration
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			RunSweep(ctx, func(_ context.Context, now time.Time) {
+				at = append(at, now.Sub(start))
+			})
+		}()
+		time.Sleep(3*SweepInterval + time.Second)
+		synctest.Wait()
+		cancel()
+		<-done
+		if want := []time.Duration{SweepInterval, 2 * SweepInterval, 3 * SweepInterval}; !slices.Equal(at, want) {
+			t.Errorf("sweeps at %v after the start, want %v", at, want)
+		}
+	})
 }

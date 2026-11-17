@@ -121,6 +121,12 @@ class Env:
         """Remove the environment permanently."""
         await self._client.delete(self._id, atespace=self._atespace)
 
+    async def set_time_to_live(self, time_to_live: float | timedelta | None) -> EnvironmentInfo:
+        """Move or remove the environment's deadline; as ``Client.set_time_to_live``."""
+        return await self._client.set_time_to_live(
+            self._id, time_to_live, atespace=self._atespace
+        )
+
     # --- processes ---
 
     async def start_process(

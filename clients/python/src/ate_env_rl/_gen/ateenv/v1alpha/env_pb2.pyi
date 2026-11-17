@@ -77,7 +77,7 @@ class Template(_message.Message):
     def __init__(self, name: _Optional[str] = ..., atespace: _Optional[str] = ...) -> None: ...
 
 class Environment(_message.Message):
-    __slots__ = ("id", "atespace", "template", "status", "node", "worker_selector", "create_time")
+    __slots__ = ("id", "atespace", "template", "status", "node", "worker_selector", "create_time", "expire_time")
     class WorkerSelectorEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -92,6 +92,7 @@ class Environment(_message.Message):
     NODE_FIELD_NUMBER: _ClassVar[int]
     WORKER_SELECTOR_FIELD_NUMBER: _ClassVar[int]
     CREATE_TIME_FIELD_NUMBER: _ClassVar[int]
+    EXPIRE_TIME_FIELD_NUMBER: _ClassVar[int]
     id: str
     atespace: str
     template: Template
@@ -99,10 +100,11 @@ class Environment(_message.Message):
     node: str
     worker_selector: _containers.ScalarMap[str, str]
     create_time: _timestamp_pb2.Timestamp
-    def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., template: _Optional[_Union[Template, _Mapping]] = ..., status: _Optional[_Union[EnvironmentStatus, str]] = ..., node: _Optional[str] = ..., worker_selector: _Optional[_Mapping[str, str]] = ..., create_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    expire_time: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., template: _Optional[_Union[Template, _Mapping]] = ..., status: _Optional[_Union[EnvironmentStatus, str]] = ..., node: _Optional[str] = ..., worker_selector: _Optional[_Mapping[str, str]] = ..., create_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class CreateEnvironmentRequest(_message.Message):
-    __slots__ = ("id", "atespace", "template", "rootfs_image", "worker_selector")
+    __slots__ = ("id", "atespace", "template", "rootfs_image", "worker_selector", "time_to_live")
     class WorkerSelectorEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -115,12 +117,14 @@ class CreateEnvironmentRequest(_message.Message):
     TEMPLATE_FIELD_NUMBER: _ClassVar[int]
     ROOTFS_IMAGE_FIELD_NUMBER: _ClassVar[int]
     WORKER_SELECTOR_FIELD_NUMBER: _ClassVar[int]
+    TIME_TO_LIVE_FIELD_NUMBER: _ClassVar[int]
     id: str
     atespace: str
     template: Template
     rootfs_image: str
     worker_selector: _containers.ScalarMap[str, str]
-    def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., template: _Optional[_Union[Template, _Mapping]] = ..., rootfs_image: _Optional[str] = ..., worker_selector: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    time_to_live: _duration_pb2.Duration
+    def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., template: _Optional[_Union[Template, _Mapping]] = ..., rootfs_image: _Optional[str] = ..., worker_selector: _Optional[_Mapping[str, str]] = ..., time_to_live: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class CreateEnvironmentResponse(_message.Message):
     __slots__ = ("environment",)
@@ -223,6 +227,22 @@ class DeleteEnvironmentRequest(_message.Message):
 class DeleteEnvironmentResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class SetEnvironmentTimeToLiveRequest(_message.Message):
+    __slots__ = ("id", "atespace", "time_to_live")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    ATESPACE_FIELD_NUMBER: _ClassVar[int]
+    TIME_TO_LIVE_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    atespace: str
+    time_to_live: _duration_pb2.Duration
+    def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., time_to_live: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+
+class SetEnvironmentTimeToLiveResponse(_message.Message):
+    __slots__ = ("environment",)
+    ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    environment: Environment
+    def __init__(self, environment: _Optional[_Union[Environment, _Mapping]] = ...) -> None: ...
 
 class GetServerInfoRequest(_message.Message):
     __slots__ = ()

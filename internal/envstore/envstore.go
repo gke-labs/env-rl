@@ -25,6 +25,10 @@
 // an environment from a later one with the same id. An object whose actor is
 // gone, or has another uid, is an orphan, and SweepOrphans deletes it.
 //
+// A deadline is a time after which ate-env-api deletes the environment.
+// Expired lists the objects whose deadline is past, and Read gives the copy
+// of the Kubernetes API server, which the caller checks before it deletes.
+//
 // Reads come from an informer and never call the Kubernetes API. Thus a read
 // on one replica follows a write on another after the delay of a watch event.
 package envstore
@@ -34,6 +38,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -50,22 +55,30 @@ const (
 	// LabelAtespace is on each object of the store, with the atespace of its
 	// environment. The informer selects the objects that have it.
 	LabelAtespace = "ate-env.dev/atespace"
-	// LabelDeadline is "true" on an object that holds a deadline.
-	LabelDeadline = "ate-env.dev/deadline"
+	// LabelDeadline is on an object that holds a deadline: DeadlineSet, or
+	// DeadlineFailed once the sweep stopped trying to delete the environment
+	// (Record.DeleteFailed). `kubectl get configmaps -l
+	// ate-env.dev/deadline=failed` lists those environments.
+	LabelDeadline  = "ate-env.dev/deadline"
+	DeadlineSet    = "true"
+	DeadlineFailed = "failed"
 
-	dataLabels     = "labels"
-	dataExpireTime = "expire_time"
-	dataUID        = "uid"
+	dataLabels         = "labels"
+	dataExpireTime     = "expire_time"
+	dataUID            = "uid"
+	dataDeleteFailures = "delete_failures"
+	dataDeleteFailTime = "delete_failure_time"
 )
 
 // Verbs are the calls the store makes on ConfigMaps, and all of them: the
-// informer lists and watches, a write creates and deletes (it never
-// updates), and a delete deletes. Reads come from the informer, and the one
-// read of the API server, of the object that refused a write, is a list of
-// one name, thus the store never gets one object. The Role of ate-env manifest
-// --environment-metadata grants these verbs and no other; a test of each
-// side holds the two together.
-var Verbs = []string{"list", "watch", "create", "delete"}
+// informer lists and watches, a first write creates, a write over the object
+// of an earlier environment deletes and creates, a change of the object of
+// the same environment updates, and a delete deletes. Reads come from the
+// informer, and a read of the API server (Read, and the object that refused
+// a write) is a list of one name, thus the store never gets one object. The
+// Role of ate-env manifest --environment-metadata grants these verbs and no
+// other; a test of each side holds the two together.
+var Verbs = []string{"list", "watch", "create", "update", "delete"}
 
 // Record is what the store holds for one environment.
 type Record struct {
@@ -78,10 +91,19 @@ type Record struct {
 	Labels map[string]string
 	// ExpireTime is the deadline; zero means none.
 	ExpireTime time.Time
+	// DeleteFailures counts the deletes by deadline that Substrate refused.
+	// The count is in the object, thus the replicas share it.
+	DeleteFailures int
+	// LastDeleteFailure is when the last of DeleteFailures was counted.
+	LastDeleteFailure time.Time
+	// DeleteFailed marks an object whose environment the sweep stopped
+	// trying to delete. Expired does not list it. It needs a deadline.
+	DeleteFailed bool
 
 	// Written is when Kubernetes created the object. Set on a read.
 	Written time.Time
-	// The identity of the object as the informer saw it, for a delete that
+	// The identity of the object as the read saw it (the informer's, or the
+	// API server's for Read and ExistsError), for a delete or an update that
 	// must not remove a later write.
 	objectUID       types.UID
 	resourceVersion string
@@ -249,10 +271,74 @@ func (s *Store) object(r Record) (*corev1.ConfigMap, error) {
 		Data: map[string]string{dataUID: r.UID, dataLabels: string(labels)},
 	}
 	if !r.ExpireTime.IsZero() {
-		cm.Labels[LabelDeadline] = "true"
+		cm.Labels[LabelDeadline] = DeadlineSet
+		if r.DeleteFailed {
+			cm.Labels[LabelDeadline] = DeadlineFailed
+		}
 		cm.Data[dataExpireTime] = r.ExpireTime.UTC().Format(time.RFC3339Nano)
+		if r.DeleteFailures > 0 {
+			cm.Data[dataDeleteFailures] = strconv.Itoa(r.DeleteFailures)
+			if !r.LastDeleteFailure.IsZero() {
+				cm.Data[dataDeleteFailTime] = r.LastDeleteFailure.UTC().Format(time.RFC3339Nano)
+			}
+		}
 	}
 	return cm, nil
+}
+
+// Update changes the object of an environment in place: existing, a record
+// that Get, Read or an ExistsError returned, becomes r. It is for a change
+// of the object of the same actor, such as a new deadline: the object keeps
+// its create time, and no moment has the environment without its object,
+// which a delete and a create would have. The update carries the uid and the
+// resource version of existing. When the object is gone or was written again
+// since, Update writes nothing and returns ErrObjectChanged.
+func (s *Store) Update(ctx context.Context, r Record, existing Record) error {
+	cm, err := s.object(r)
+	if err != nil {
+		return err
+	}
+	if existing.objectUID == "" || existing.resourceVersion == "" {
+		return errors.New("envstore: Update needs a record that the store read")
+	}
+	if r.UID != existing.UID || r.Atespace != existing.Atespace || r.ID != existing.ID {
+		return errors.New("envstore: Update changes the object of the same actor only; Replace writes over the object of another")
+	}
+	cm.UID = existing.objectUID
+	cm.ResourceVersion = existing.resourceVersion
+	_, err = s.maps.Update(ctx, cm, metav1.UpdateOptions{})
+	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
+		return fmt.Errorf("%w: %s/%s", ErrObjectChanged, r.Atespace, r.ID)
+	}
+	return wrap(err, "updating", r.Atespace, r.ID)
+}
+
+// Read returns the record of an environment from the Kubernetes API server,
+// and false when it has no object. It is the read before a delete by
+// deadline: the informer of this replica can be behind a write of another.
+// An object that holds no readable record comes back with no actor uid.
+func (s *Store) Read(ctx context.Context, atespace, id string) (Record, bool, error) {
+	r, found, err := s.read(ctx, ObjectName(atespace, id), atespace, id)
+	return r, found, wrap(err, "reading", atespace, id)
+}
+
+// Expired returns, from the informer, the records whose deadline is at or
+// before now and that are not marked DeleteFailed. An object that holds no
+// readable record is not in the list; SweepOrphans deletes and reports it.
+func (s *Store) Expired(now time.Time) []Record {
+	var out []Record
+	for _, obj := range s.informer.GetStore().List() {
+		cm := obj.(*corev1.ConfigMap)
+		if cm.Labels[LabelDeadline] != DeadlineSet {
+			continue
+		}
+		r, err := decode(cm, cm.Labels[LabelAtespace], "")
+		if err != nil || r.ExpireTime.IsZero() || r.ExpireTime.After(now) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // read returns the object of that name from the API server, with a list of
@@ -389,7 +475,7 @@ func (s *Store) SweepOrphans(ctx context.Context, actors ActorUIDs, grace time.D
 	return deleted, errors.Join(errs...)
 }
 
-// SweepInterval is how often RunSweep sweeps, and OrphanGrace how old an
+// SweepInterval is how often RunSweep calls its sweep, and OrphanGrace how old an
 // object is before the sweep can call it an orphan: longer than the delay
 // between a write of Substrate and a list that shows it, and than the
 // difference between the clocks of the API server and of ate-env-api.
@@ -400,9 +486,10 @@ const (
 	SyncTimeout   = 30 * time.Second
 )
 
-// RunSweep sweeps the orphans on a timer until ctx ends. report gets the
-// result of each sweep that deleted an object or failed.
-func (s *Store) RunSweep(ctx context.Context, actors ActorUIDs, report func(deleted int, err error)) {
+// RunSweep calls sweep on a timer until ctx ends, with ctx and the time of
+// the tick. The sweep bounds its own parts; a sweep that takes longer than
+// one interval skips the ticks it missed.
+func RunSweep(ctx context.Context, sweep func(ctx context.Context, now time.Time)) {
 	ticker := time.NewTicker(SweepInterval)
 	defer ticker.Stop()
 	for {
@@ -410,14 +497,7 @@ func (s *Store) RunSweep(ctx context.Context, actors ActorUIDs, report func(dele
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			// One sweep has one interval: a control plane that does not
-			// answer must not stop the sweeps after it.
-			sweep, cancel := context.WithTimeout(ctx, SweepInterval)
-			deleted, err := s.SweepOrphans(sweep, actors, OrphanGrace, now)
-			cancel()
-			if deleted > 0 || err != nil {
-				report(deleted, err)
-			}
+			sweep(ctx, now)
 		}
 	}
 }
@@ -454,6 +534,21 @@ func decode(cm *corev1.ConfigMap, atespace, id string) (Record, error) {
 			return Record{}, fmt.Errorf("envstore: expire_time of object %s/%s: %w", cm.Namespace, cm.Name, err)
 		}
 		r.ExpireTime = t
+		r.DeleteFailed = cm.Labels[LabelDeadline] == DeadlineFailed
+		if raw := cm.Data[dataDeleteFailures]; raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 {
+				return Record{}, fmt.Errorf("envstore: delete_failures of object %s/%s: %q is not a count", cm.Namespace, cm.Name, raw)
+			}
+			r.DeleteFailures = n
+		}
+		if raw := cm.Data[dataDeleteFailTime]; raw != "" {
+			t, err := time.Parse(time.RFC3339Nano, raw)
+			if err != nil {
+				return Record{}, fmt.Errorf("envstore: delete_failure_time of object %s/%s: %w", cm.Namespace, cm.Name, err)
+			}
+			r.LastDeleteFailure = t
+		}
 	}
 	return r, nil
 }

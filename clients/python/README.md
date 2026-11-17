@@ -76,6 +76,7 @@ actor boots. Retry until it serves (see the how-to below).
 | `Client.suspend()` / `Env.suspend()` | `EnvironmentService.SuspendEnvironment` | ate-env-api → control plane |
 | `Client.delete()` / `Env.delete()` | `EnvironmentService.DeleteEnvironment` | ate-env-api → control plane |
 | `Client.list_environments()` | `EnvironmentService.ListEnvironments` | ate-env-api → control plane |
+| `Client.set_time_to_live()` / `Env.set_time_to_live()` | `EnvironmentService.SetEnvironmentTimeToLive` | ate-env-api → control plane and its environment store |
 | `Client.server_info()` | `EnvironmentService.GetServerInfo` | answered by ate-env-api |
 | `Client.env()` | *(no RPC — returns a handle)* | — |
 | `Env.start_process()` | `ProcessService.StartProcess` | proxied to guest |
@@ -184,6 +185,22 @@ while True:
     token = page.next_page_token
     if not token:
         break
+```
+
+To give an environment a deadline, pass `time_to_live` (seconds or a
+`timedelta`) to `create`: the server deletes the environment after its create
+time plus that value, in any status, also while it is suspended.
+`set_time_to_live` moves the deadline, counted from the call, and removes it
+with `None` or zero. The server must run with the environment store
+(`--environment-store=configmaps`); without it, a time to live raises
+`FailedPreconditionError` and nothing is created or changed:
+
+```python
+if "time_to_live" in (await client.server_info()).features:
+    env = await client.create("dev2", time_to_live=300)
+    print((await env.info()).expire_time)          # create time + 5 minutes, UTC
+    info = await env.set_time_to_live(3600)        # one hour from now
+    info = await env.set_time_to_live(None)        # no deadline
 ```
 
 To get a handle to an environment that already exists (no RPC is made):

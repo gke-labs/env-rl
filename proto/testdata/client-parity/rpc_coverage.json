@@ -19,6 +19,10 @@
     "go": "Delete",
     "python": "delete"
   },
+  "SetEnvironmentTimeToLive": {
+    "go": "SetTimeToLive",
+    "python": "set_time_to_live"
+  },
   "GetServerInfo": {
     "go": "ServerInfo",
     "python": "server_info"

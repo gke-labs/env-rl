@@ -78,6 +78,11 @@ class EnvironmentServiceStub:
                 request_serializer=ateenv_dot_v1alpha_dot_env__pb2.DeleteEnvironmentRequest.SerializeToString,
                 response_deserializer=ateenv_dot_v1alpha_dot_env__pb2.DeleteEnvironmentResponse.FromString,
                 _registered_method=True)
+        self.SetEnvironmentTimeToLive = channel.unary_unary(
+                '/ateenv.v1alpha.EnvironmentService/SetEnvironmentTimeToLive',
+                request_serializer=ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveRequest.SerializeToString,
+                response_deserializer=ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveResponse.FromString,
+                _registered_method=True)
         self.GetServerInfo = channel.unary_unary(
                 '/ateenv.v1alpha.EnvironmentService/GetServerInfo',
                 request_serializer=ateenv_dot_v1alpha_dot_env__pb2.GetServerInfoRequest.SerializeToString,
@@ -149,6 +154,17 @@ class EnvironmentServiceServicer:
 
     def DeleteEnvironment(self, request, context):
         """DeleteEnvironment permanently removes an environment and its associated resources.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetEnvironmentTimeToLive(self, request, context):
+        """SetEnvironmentTimeToLive gives an environment a new deadline, counted
+        from the time the server handles the call, or removes its deadline. The
+        server deletes an environment after its deadline, in any status. The
+        call needs the environment store (GetServerInfo lists "time_to_live");
+        without it the call is FAILED_PRECONDITION and changes nothing.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -239,6 +255,11 @@ def add_EnvironmentServiceServicer_to_server(servicer, server):
                     servicer.DeleteEnvironment,
                     request_deserializer=ateenv_dot_v1alpha_dot_env__pb2.DeleteEnvironmentRequest.FromString,
                     response_serializer=ateenv_dot_v1alpha_dot_env__pb2.DeleteEnvironmentResponse.SerializeToString,
+            ),
+            'SetEnvironmentTimeToLive': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetEnvironmentTimeToLive,
+                    request_deserializer=ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveRequest.FromString,
+                    response_serializer=ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveResponse.SerializeToString,
             ),
             'GetServerInfo': grpc.unary_unary_rpc_method_handler(
                     servicer.GetServerInfo,
@@ -406,6 +427,33 @@ class EnvironmentService:
             '/ateenv.v1alpha.EnvironmentService/DeleteEnvironment',
             ateenv_dot_v1alpha_dot_env__pb2.DeleteEnvironmentRequest.SerializeToString,
             ateenv_dot_v1alpha_dot_env__pb2.DeleteEnvironmentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetEnvironmentTimeToLive(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ateenv.v1alpha.EnvironmentService/SetEnvironmentTimeToLive',
+            ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveRequest.SerializeToString,
+            ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveResponse.FromString,
             options,
             channel_credentials,
             insecure,

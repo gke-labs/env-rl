@@ -47,6 +47,7 @@ import (
 // tracingFixture is the stack the SDK talks to, with the API server's gRPC
 // server traced into a recorder of its own: the server side of the trace.
 type tracingFixture struct {
+	service *apiservice.Server
 	router  *fakerouter.Router
 	control *fakecontrol.Server
 	addr    string
@@ -87,7 +88,7 @@ func newTracingFixture(t *testing.T) *tracingFixture {
 	}
 	go grpcServer.Serve(lis)
 	t.Cleanup(grpcServer.Stop)
-	return &tracingFixture{router: router, control: control, addr: lis.Addr().String(), server: serverRec}
+	return &tracingFixture{router: router, control: control, service: service, addr: lis.Addr().String(), server: serverRec}
 }
 
 func (f *tracingFixture) serveGuest(t *testing.T, id string) {
@@ -457,6 +458,7 @@ func TestTracingCallerConnSpansMatchPythonClient(t *testing.T) {
 	_, _ = c.EnsureImageTemplate(t.Context(), &ateenvv1alpha.EnsureImageTemplateRequest{RootfsImage: "registry.example/repo@" + digest})
 	_, _ = c.ListPlacementDomains(t.Context(), &ateenvv1alpha.ListPlacementDomainsRequest{Template: &ateenvv1alpha.Template{Name: "layered", Atespace: "t-space"}})
 	_, _ = c.List(t.Context(), nil)
+	_, _ = c.SetTimeToLive(t.Context(), "t-space", "traced", time.Minute)
 	_, _ = c.WarmImage(t.Context(), &ateenvv1alpha.WarmImageRequest{RootfsImage: "registry.example/repo@" + digest, Nodes: 1, Template: &ateenvv1alpha.Template{Name: "layered", Atespace: "t-space"}}, nil)
 
 	spans := map[string][]sdktrace.ReadOnlySpan{}
@@ -471,7 +473,8 @@ func TestTracingCallerConnSpansMatchPythonClient(t *testing.T) {
 		"get_server_info":  "GetServerInfo",
 		"get_image_status": "GetImageStatus", "ensure_image_template": "EnsureImageTemplate",
 		"list_placement_domains": "ListPlacementDomains", "warm_image": "WarmImage",
-		"list_environments": "ListEnvironments",
+		"list_environments":            "ListEnvironments",
+		"set_environment_time_to_live": "SetEnvironmentTimeToLive",
 	} {
 		if len(spans[prefix+op]) == 0 {
 			t.Errorf("no %s span", op)

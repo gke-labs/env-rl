@@ -151,6 +151,10 @@ class EnvironmentInfo:
     # When Substrate created the environment's actor, in UTC; None when the
     # server did not report it.
     create_time: datetime | None = None
+    # The deadline, in UTC: the server deletes the environment after it. None
+    # when the environment has no deadline, or the server runs without the
+    # environment store.
+    expire_time: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -410,6 +414,9 @@ def _environment_info_from_pb(pb: env_pb2.Environment) -> EnvironmentInfo:
         worker_selector=dict(pb.worker_selector),
         create_time=(
             pb.create_time.ToDatetime(tzinfo=timezone.utc) if pb.HasField("create_time") else None
+        ),
+        expire_time=(
+            pb.expire_time.ToDatetime(tzinfo=timezone.utc) if pb.HasField("expire_time") else None
         ),
     )
 

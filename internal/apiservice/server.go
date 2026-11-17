@@ -42,6 +42,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // DefaultTemplate is the ActorTemplate name used when a create request
@@ -202,17 +203,37 @@ func (s *Server) isRouterClosed() bool {
 // recreateFailedImageTemplate), and the response reports it in
 // Environment.template. When rootfs_image is empty the template is used as is.
 //
-// Errors: InvalidArgument for a missing id, a rootfs image not pinned by digest, a
+// With time_to_live, the environment gets a deadline: the create time of its
+// actor plus the value. The actor is created first, then its object in the
+// store, with the uid of the actor and the deadline (decision EM-E). When
+// that write fails, the actor is deleted, with its uid as the precondition,
+// and the create fails. A create with no time_to_live writes no object and
+// makes no call to Kubernetes.
+//
+// Errors: InvalidArgument for a missing id, a negative time_to_live, a rootfs
+// image not pinned by digest, a
 // derived name that is too long or not a valid resource name, or a base that
 // cannot be derived from (no containers, unpinned guest image, or a command
 // that cannot be re-rooted under the guest volume). FailedPrecondition when
-// the base template does not exist in the atespace, or when the derived name
-// is already held by a template running a different image. DeadlineExceeded
+// the base template does not exist in the atespace, when the derived name
+// is already held by a template running a different image, or for a
+// time_to_live on a server that runs without the store (nothing is created).
+// Unavailable when the deadline was not written and the environment was
+// deleted again. DeadlineExceeded
 // or Canceled when the request ends while a recreate of its derived template
 // runs. Other control plane failures are mapped by toGRPCError.
 func (s *Server) CreateEnvironment(ctx context.Context, req *ateenvv1alpha.CreateEnvironmentRequest) (resp *ateenvv1alpha.CreateEnvironmentResponse, retErr error) {
 	if req.GetId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "id is required")
+	}
+	ttl, err := timeToLive(req.GetTimeToLive())
+	if err != nil {
+		return nil, err
+	}
+	if ttl > 0 && s.Store == nil {
+		// Never accept and drop: the caller would wait for a delete that
+		// does not come.
+		return nil, errStoreOff("time_to_live")
 	}
 	var start time.Time
 	if s.Metrics != nil {
@@ -255,19 +276,26 @@ func (s *Server) CreateEnvironment(ctx context.Context, req *ateenvv1alpha.Creat
 		s.awakeEnvs.Remove(atespace + "/" + req.GetId())
 	}
 
-	return &ateenvv1alpha.CreateEnvironmentResponse{
-		Environment: &ateenvv1alpha.Environment{
-			Id:       req.GetId(),
+	env := &ateenvv1alpha.Environment{
+		Id:       req.GetId(),
+		Atespace: atespace,
+		Template: &ateenvv1alpha.Template{
+			Name:     templateName,
 			Atespace: atespace,
-			Template: &ateenvv1alpha.Template{
-				Name:     templateName,
-				Atespace: atespace,
-			},
-			Status:         ateenvv1alpha.EnvironmentStatus_ENVIRONMENT_STATUS_UNSPECIFIED,
-			WorkerSelector: req.GetWorkerSelector(),
-			CreateTime:     actor.GetMetadata().GetCreateTime(),
 		},
-	}, nil
+		Status:         ateenvv1alpha.EnvironmentStatus_ENVIRONMENT_STATUS_UNSPECIFIED,
+		WorkerSelector: req.GetWorkerSelector(),
+		CreateTime:     actor.GetMetadata().GetCreateTime(),
+	}
+	if ttl > 0 {
+		expire, err := s.writeCreateDeadline(ctx, atespace, actor, ttl)
+		if err != nil {
+			return nil, err
+		}
+		// What this call wrote: the informer can be behind it (EM-D).
+		env.ExpireTime = timestamppb.New(expire)
+	}
+	return &ateenvv1alpha.CreateEnvironmentResponse{Environment: env}, nil
 }
 
 // templateDefaults resolves a request's base template name and atespace the
@@ -474,7 +502,9 @@ func sameImageDigest(a, b string) bool {
 	return da == db
 }
 
-// GetEnvironment retrieves the status and configuration of an existing environment.
+// GetEnvironment retrieves the status and configuration of an existing
+// environment. Its expire_time comes from the informer of the store: the
+// read makes no call to Kubernetes (decision EM-D).
 func (s *Server) GetEnvironment(ctx context.Context, req *ateenvv1alpha.GetEnvironmentRequest) (*ateenvv1alpha.GetEnvironmentResponse, error) {
 	if req.GetId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "id is required")
@@ -493,7 +523,7 @@ func (s *Server) GetEnvironment(ctx context.Context, req *ateenvv1alpha.GetEnvir
 	setSpanActorAttributes(ctx, actor)
 
 	return &ateenvv1alpha.GetEnvironmentResponse{
-		Environment: ActorToEnvironment(actor),
+		Environment: s.withDeadline(ActorToEnvironment(actor), actor.GetMetadata().GetUid()),
 	}, nil
 }
 
@@ -546,7 +576,7 @@ func (s *Server) ListEnvironments(ctx context.Context, req *ateenvv1alpha.ListEn
 	}
 	resp := &ateenvv1alpha.ListEnvironmentsResponse{NextPageToken: next}
 	for _, actor := range actors {
-		env := ActorToEnvironment(actor)
+		env := s.withDeadline(ActorToEnvironment(actor), actor.GetMetadata().GetUid())
 		if len(keep) > 0 && !keep[env.GetStatus()] {
 			continue
 		}
@@ -615,24 +645,10 @@ func (s *Server) DeleteEnvironment(ctx context.Context, req *ateenvv1alpha.Delet
 		}
 	}
 
-	if err := s.client.Delete(ctx, atespace, req.GetId()); err != nil {
+	// A caller's delete names the environment by its id and sends no uid
+	// precondition; the deadline sweep, on the same path, sends one.
+	if err := s.deleteEnvironment(ctx, atespace, req.GetId(), "", record, hasRecord); err != nil {
 		return nil, toGRPCError(err)
-	}
-	if s.ReactiveWake && s.awakeEnvs != nil {
-		s.awakeEnvs.Remove(atespace + "/" + req.GetId())
-	}
-	s.finishCreate(atespace, req.GetId(), telemetry.ReadyStatusDeleted)
-	if hasRecord {
-		// The environment is deleted: the actor is the truth. The delete
-		// removes only the object read above; one written since is of a new
-		// environment with this id. An object that stays is an orphan, and
-		// the sweep removes it. The caller's context can have ended with
-		// the actor's delete, thus this call has a time of its own.
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		if err := s.Store.Delete(ctx, record); err != nil {
-			log.Printf("apiservice: DeleteEnvironment %s/%s: %v; the orphan sweep removes the object", atespace, req.GetId(), err)
-		}
 	}
 
 	return &ateenvv1alpha.DeleteEnvironmentResponse{}, nil

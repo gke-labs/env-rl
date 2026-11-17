@@ -59,20 +59,21 @@ const (
 
 // Operations, the part of each span name after "<TraceServiceName>.".
 const (
-	opCreateEnvironment    = "create_environment"
-	opGetEnvironment       = "get_environment"
-	opListEnvironments     = "list_environments"
-	opSuspendEnvironment   = "suspend_environment"
-	opDeleteEnvironment    = "delete_environment"
-	opStartProcess         = "start_process"
-	opExec                 = "exec"
-	opReadFile             = "read_file"
-	opWriteFile            = "write_file"
-	opGetServerInfo        = "get_server_info"
-	opGetImageStatus       = "get_image_status"
-	opEnsureImageTemplate  = "ensure_image_template"
-	opListPlacementDomains = "list_placement_domains"
-	opWarmImage            = "warm_image"
+	opCreateEnvironment        = "create_environment"
+	opGetEnvironment           = "get_environment"
+	opListEnvironments         = "list_environments"
+	opSuspendEnvironment       = "suspend_environment"
+	opDeleteEnvironment        = "delete_environment"
+	opSetEnvironmentTimeToLive = "set_environment_time_to_live"
+	opStartProcess             = "start_process"
+	opExec                     = "exec"
+	opReadFile                 = "read_file"
+	opWriteFile                = "write_file"
+	opGetServerInfo            = "get_server_info"
+	opGetImageStatus           = "get_image_status"
+	opEnsureImageTemplate      = "ensure_image_template"
+	opListPlacementDomains     = "list_placement_domains"
+	opWarmImage                = "warm_image"
 )
 
 // tracePropagator is the only propagator the client uses: W3C Trace

@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import grpc
 
@@ -61,6 +61,9 @@ class FakeEnvironmentService(env_pb2_grpc.EnvironmentServiceServicer):
         self.environments: dict[tuple[str, str], env_pb2.Environment] = {}
         self.last_create_request: env_pb2.CreateEnvironmentRequest | None = None
         self.last_suspend_request: env_pb2.SuspendEnvironmentRequest | None = None
+        # Whether the server runs with the environment store, thus accepts a
+        # time to live. Off, as ate-env-api is by default.
+        self.time_to_live = False
         # Placement, for creates, ListPlacementDomains and WarmImage: the nodes
         # behind each value of the ate-env/domain selector label, the slots per node
         # per domain, whether the global role is missing, whether every probe
@@ -117,6 +120,16 @@ class FakeEnvironmentService(env_pb2_grpc.EnvironmentServiceServicer):
         key = (atespace, request.id)
         if not request.id:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "id is required")
+        # Mirror ate-env-api: a negative time to live is INVALID_ARGUMENT, and
+        # a positive one needs the environment store; both create nothing,
+        # and both come before the control plane is asked about the id.
+        ttl = request.time_to_live.ToTimedelta()
+        if ttl < timedelta(0):
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"time_to_live {ttl} is negative")
+        if ttl > timedelta(0) and not self.time_to_live:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, "time_to_live needs the environment store"
+            )
         if key in self.environments:
             await context.abort(
                 grpc.StatusCode.ALREADY_EXISTS,
@@ -136,7 +149,28 @@ class FakeEnvironmentService(env_pb2_grpc.EnvironmentServiceServicer):
             digest = request.rootfs_image.split("@sha256:", 1)[1]
             template.name = f"{template.name}-{digest[:12]}"
         environment = self._new_environment(key, template, request.worker_selector)
+        if ttl > timedelta(0):
+            # The deadline counts from the create time.
+            environment.expire_time.FromDatetime(environment.create_time.ToDatetime() + ttl)
         return env_pb2.CreateEnvironmentResponse(environment=environment)
+
+    async def SetEnvironmentTimeToLive(self, request, context):
+        # Mirror ate-env-api: the new deadline counts from the call, zero
+        # removes it, a negative value is INVALID_ARGUMENT, and the call
+        # needs the environment store. The fake deletes nothing at a deadline.
+        ttl = request.time_to_live.ToTimedelta()
+        if ttl < timedelta(0):
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"time_to_live {ttl} is negative")
+        if not self.time_to_live:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "SetEnvironmentTimeToLive needs the environment store",
+            )
+        environment = await self._lookup(request, context)
+        environment.ClearField("expire_time")
+        if ttl > timedelta(0):
+            environment.expire_time.FromDatetime(datetime.now(timezone.utc).replace(tzinfo=None) + ttl)
+        return env_pb2.SetEnvironmentTimeToLiveResponse(environment=environment)
 
     def _new_environment(self, key, template, worker_selector) -> env_pb2.Environment:
         """Place and store an environment, as a create and a WarmImage probe do."""
@@ -460,7 +494,8 @@ class FakeEnvironmentService(env_pb2_grpc.EnvironmentServiceServicer):
             server="sandboxenv-rl",
             version="v0.0.0-fake",
             substrate_version="unknown",
-            features=["rootfs_image", "pty", "suspend_mode", "image_status", "placement_domains", "warm_image"],
+            features=["rootfs_image", "pty", "suspend_mode", "image_status", "placement_domains", "warm_image"]
+            + (["time_to_live"] if self.time_to_live else []),
         )
 
     async def _lookup(self, request, context):

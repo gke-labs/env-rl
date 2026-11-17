@@ -395,9 +395,7 @@ func main() {
 			return
 		}
 		apisvc.Store = store
-		go store.RunSweep(ctx, apisvc.ActorUIDs, func(deleted int, err error) {
-			log.Printf("environment store: the orphan sweep deleted %d objects, error: %v", deleted, err)
-		})
+		go envstore.RunSweep(ctx, apisvc.Sweep)
 	}
 
 	// A metrics server that stops with an error stops the API server too.

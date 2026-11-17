@@ -93,3 +93,10 @@ func (s *Server) AwakeCacheLen() int {
 	defer s.awakeEnvs.mu.Unlock()
 	return len(s.awakeEnvs.entries)
 }
+
+// DeadlineDeleteTries and DeadlineTryInterval are the limits of the deadline
+// sweep, for its tests.
+const (
+	DeadlineDeleteTries = deadlineDeleteTries
+	DeadlineTryInterval = deadlineTryInterval
+)

@@ -134,6 +134,35 @@
     }
   },
   {
+    "operation": "set_environment_time_to_live",
+    "inputs": {
+      "id": "traced",
+      "atespace": "t-space"
+    },
+    "expected_span": "set_environment_time_to_live",
+    "expected_attributes": {
+      "ate.actor.name": "traced",
+      "ate.atespace": "t-space"
+    }
+  },
+  {
+    "name": "set_environment_time_to_live/default_atespace",
+    "operation": "set_environment_time_to_live",
+    "inputs": {
+      "id": "traced"
+    },
+    "expected_span": "set_environment_time_to_live",
+    "expected_attributes": {
+      "ate.actor.name": "traced"
+    },
+    "python_only": {
+      "attributes": {
+        "ate.atespace": "ate-env"
+      },
+      "reason": "Python Client.set_time_to_live defaults atespace to ate-env; Go takes a positional atespace and omits ate.atespace when empty, as for get, suspend and delete (docs/plans/telemetry/decisions.md, 2026-11-12)"
+    }
+  },
+  {
     "operation": "get_server_info",
     "inputs": {},
     "expected_span": "get_server_info",
