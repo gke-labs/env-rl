@@ -2,7 +2,7 @@
 
 Status: proposal, 2026-11-13, checked against `main` at `456353fd` and Substrate at the pin
 (`274605f1`) and at its `main` (`cf5768a0`). Pull request 1, the store, is #407. Pull request 3, the
-time to live, is #PRNUM. Labels (2) and `ate_env_e2b` (4) are not built. Decided on 2026-11-15: EM-E
+time to live, is #432. Labels (2) and `ate_env_e2b` (4) are not built. Decided on 2026-11-15: EM-E
 (the actor first) and EM-F (a read from the API server before each delete by deadline). Decided on
 2026-11-16: EM-D (reads from the informer alone), EM-G (a list with a selector takes the ids from
 the informer), EM-H (one switch, and E2B's default lifetime with it) and EM-I (the sweep stops after
@@ -240,7 +240,7 @@ when one does.
 | this         | This plan and the `EM` criteria                                                                                       |                       |
 | 1 (#407)     | The store: the flag, the manifest switch with the Role, the informer, the object for an environment, the orphan sweep | this                  |
 | 2            | Labels: the create field, get, the list filter; Go and Python clients                                                 | 1, `ListEnvironments` |
-| 3 (#PRNUM)   | The time to live: the create field, `SetEnvironmentTimeToLive`, the deadline sweep; Go and Python clients             | 1                     |
+| 3 (#432)     | The time to live: the create field, `SetEnvironmentTimeToLive`, the deadline sweep; Go and Python clients             | 1                     |
 | 4            | `ate_env_e2b`: `metadata`, `Sandbox.list`, `timeout`, `set_timeout` (E2B-31, E2B-32)                                  | 2, 3                  |
 
 ## 7. Open points
