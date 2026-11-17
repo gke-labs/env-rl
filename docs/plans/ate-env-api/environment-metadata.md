@@ -101,12 +101,21 @@ Kubernetes API server.
 
 A delete can fail for good. `WarmImage` records one case: a probe that is `CRASHED` after a resume
 that failed, which Substrate refuses to delete (`FailedPrecondition`, "DeleteVolumes prerequisite
-not met"; see `deleteWarmProbe`). An environment in that state at its deadline is not deleted by any
-number of sweeps. EM-I, decided: the sweep counts each failed delete by deadline in the object, thus
-the replicas share the count. After 5 failed tries it stops: it marks the object as failed, keeps
-it, and reports the environment once, in a log line and in a metric. The environment stays, with its
-labels and its past `expire_time`. A delete by a caller, or a new `SetEnvironmentTimeToLive`, clears
-the mark.
+not met"; see `deleteWarmProbe`). Substrate gives that answer when the actor is not in `DELETING` at
+that step of the delete, and a delete does not mark again an actor that an earlier delete marked
+(`workflow_delete.go` at the pin). A `CRASHED` actor that no delete marked is deleted. An
+environment in the refused state at its deadline is not deleted by any number of sweeps. EM-I,
+decided: the sweep counts each refused delete by deadline in the object, thus the replicas share the
+count. A refusal is `FailedPrecondition`. Each other failure (no answer, `Unavailable`,
+`ResourceExhausted`, `Internal`, a sweep out of time) is tried again on the next sweep and is not
+counted, thus a control plane that does not answer for some sweeps uses no try. After 5 counted
+tries the sweep stops: it marks the object as failed, keeps it, and reports the environment once, in
+a log line and in a metric. The environment stays, with its labels and its past `expire_time`. The
+count is written in place, with the uid and the resource version of the object as the precondition:
+a delete and a create would give the object a new create time, and a crash between the two would
+lose the labels and the deadline. That write needs the verb `update`, which the Role of pull request
+1 does not grant; pull request 3 adds it (see the next section). A delete by a caller, or a new
+`SetEnvironmentTimeToLive`, clears the mark.
 
 To know that an object is an orphan, the sweep must read the actor, and actors are not in the
 informer. That is a read from Substrate in each replica on each interval: one `GetActor` for each
@@ -127,8 +136,12 @@ The store is off by default: `--environment-store=configmaps` on `ate-env-api` t
 `ate-env manifest --environment-metadata` sets the flag and adds what it needs: a Role and a
 RoleBinding for `list`, `watch`, `create` and `delete` on ConfigMaps in the namespace of
 `ate-env-api`, and the Kubernetes API token in the pod. These are the calls the store makes: its
-informer lists and watches, and a write creates and deletes. The pull request that reads an object
-from the API server before a delete by deadline (EM-F) adds `get`.
+informer lists and watches, and a write creates and deletes. Pull request 3 adds `update`: for the
+count of refused deletes (EM-I), and for a `SetEnvironmentTimeToLive` on an environment that has an
+object. Its read of an object from the API server before a delete by deadline (EM-F) is a list of
+one name, as the read after a refused write is, thus the Role gets no `get`. An operator who applied
+the Role of pull request 1 applies the manifest again. `envstore.Verbs` and the Role stay equal, and
+a test of each side holds the two together.
 
 The store's Kubernetes client has a rate limit of its own: 50 requests per second with a burst of
 100, on each replica (`--environment-store-qps`, `--environment-store-burst`; a negative rate sets
