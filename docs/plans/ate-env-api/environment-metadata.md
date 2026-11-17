@@ -161,14 +161,15 @@ dropped.
 
 On `proto/ateenv/v1alpha`:
 
-| Change                                                 | Meaning                                                                                        |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `CreateEnvironmentRequest.labels`                      | Labels of the new environment.                                                                 |
-| `CreateEnvironmentRequest.time_to_live`                | A duration from the create. Unset: no deadline.                                                |
-| `Environment.labels`, `Environment.expire_time`        | Returned by get, create and list.                                                              |
-| `ListEnvironmentsRequest.label_selector`               | Equality on a set of labels. Applied with the status filter, on each page.                     |
-| `SetEnvironmentTimeToLive(id, atespace, time_to_live)` | A new deadline, counted from the call. Zero removes the deadline. This is E2B's `set_timeout`. |
-| `GetServerInfoResponse`                                | Says whether labels and the time to live are on.                                               |
+| Change                                                 | Meaning                                                                                                                                                                                            |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CreateEnvironmentRequest.labels`                      | Labels of the new environment.                                                                                                                                                                     |
+| `CreateEnvironmentRequest.time_to_live`                | A duration from the create. Unset: no deadline.                                                                                                                                                    |
+| `Environment.labels`, `Environment.expire_time`        | Returned by get, create and list.                                                                                                                                                                  |
+| `ListEnvironmentsRequest.label_selector`               | Equality on a set of labels. Applied with the status filter, on each page.                                                                                                                         |
+| `SetEnvironmentTimeToLive(id, atespace, time_to_live)` | A new deadline, counted from the call. Zero removes the deadline. This is E2B's `set_timeout`.                                                                                                     |
+| `SetEnvironmentTimeToLiveResponse.environment`         | The environment as `GetEnvironment` reports it, with the deadline that the call wrote in `expire_time` (unset when the call removed the deadline). The caller needs no read after the call (EM-D). |
+| `GetServerInfoResponse`                                | Says whether labels and the time to live are on.                                                                                                                                                   |
 
 Labels are set at create and not changed after it. No user needs an update yet; it is one more RPC
 when one does.
