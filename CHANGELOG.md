@@ -852,6 +852,13 @@ user needs to know across them.
   stays as a re-export of the new module, with the same names.
 
 ### Fixed
+- ate-env-guest: `SignalProcess` and `WriteProcessInput` report that a
+  process has exited only after its concurrency slot is free, waiting up to
+  a second for the guest to release it. Before, they could return
+  `FailedPrecondition` ("has exited") from the error of a system call
+  (`ESRCH`, `EPIPE`, a closed pipe or PTY) while the slot was still held,
+  and a `StartProcess` that followed at `MaxConcurrentProcesses` got
+  `ResourceExhausted` (#370).
 - swebench-loader: the step loop's park (`-mode steps` without `-strategy`
   and without the working-set flags) sends a suspend again when it fails
   with a transient error: gRPC `Unavailable`, `DeadlineExceeded`, `Unknown`,

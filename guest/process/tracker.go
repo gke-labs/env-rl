@@ -187,6 +187,21 @@ func (p *ProcessState) Exited() bool {
 // has been flushed to the log spool.
 func (p *ProcessState) Done() <-chan struct{} { return p.done }
 
+// reapWaitTimeout bounds how long Signal and WriteInput wait for reap once a
+// system call error shows that the process is gone (#370).
+const reapWaitTimeout = time.Second
+
+// waitReaped waits, for at most reapWaitTimeout, until reap has released the
+// concurrency slot and closed done. Callers that report ErrExited from a
+// system call error (ESRCH, EPIPE, a closed file) call it first, because that
+// error can arrive between cmd.Wait and the slot release in reap.
+func (p *ProcessState) waitReaped() {
+	select {
+	case <-p.done:
+	case <-time.After(reapWaitTimeout):
+	}
+}
+
 // OutputChanged returns a channel closed the next time bytes are appended to
 // either output spool. Obtain it before reading the spool to avoid missing a
 // wakeup.
@@ -531,9 +546,10 @@ func (t *Tracker) reap(state *ProcessState, cmd *exec.Cmd, stdoutFile, stderrFil
 	// once done closes, and a caller that chains a wait and a start at
 	// MaxConcurrentProcesses counts on the slot being free by then (#332).
 	// Nothing runs in the slot any more: Wait has reaped the process.
-	// Not covered: SignalProcess, WriteProcessInput and ResizeProcess can
-	// return ErrExited before this line, from the error of the system call
-	// (ESRCH, EPIPE, a closed PTY), while the slot is still held (#370).
+	// SignalProcess and WriteProcessInput can see the exit before this
+	// line, from the error of a system call (ESRCH, EPIPE, a closed pipe or
+	// PTY), so they call waitReaped before they report ErrExited (#370).
+	// ResizeProcess returns an Internal error in that window instead (#444).
 	t.decrementActive()
 
 	state.mu.Lock()
@@ -624,6 +640,9 @@ func (t *Tracker) Signal(processID string, sig syscall.Signal) error {
 	// thanks to Setpgid).
 	if err := syscall.Kill(-pid, sig); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
+			// ESRCH arrives once cmd.Wait has reaped the process, which can
+			// be before reap releases the slot (#370).
+			state.waitReaped()
 			return ErrExited
 		}
 		return fmt.Errorf("sending %v: %w", sig, err)
@@ -641,18 +660,27 @@ func (t *Tracker) WriteInput(processID string, data []byte) (int, error) {
 		return 0, ErrNoStdin
 	}
 
+	// stdinMu is unlocked explicitly, not with defer: the error path below
+	// calls waitReaped, which waits for reap to close done, and reap takes
+	// stdinMu to mark stdin closed before it closes done. Waiting with
+	// stdinMu held would stall reap until reapWaitTimeout, and for a PTY
+	// before reap has even released the concurrency slot (#370).
 	state.stdinMu.Lock()
-	defer state.stdinMu.Unlock()
 	if state.stdinClosed {
+		state.stdinMu.Unlock()
 		if state.Exited() {
 			return 0, ErrExited
 		}
 		return 0, ErrStdinClosed
 	}
 	n, err := state.stdin.Write(data)
+	state.stdinMu.Unlock()
 	if err != nil {
-		// os.ErrClosed: reap closed the PTY master after the process exited.
+		// os.ErrClosed: cmd.Wait closed the stdin pipe, or reap closed the
+		// PTY master, after the process exited. EPIPE and os.ErrClosed can
+		// arrive before reap releases the slot (#370).
 		if state.Exited() || errors.Is(err, syscall.EPIPE) || errors.Is(err, os.ErrClosed) {
+			state.waitReaped()
 			return n, ErrExited
 		}
 		return n, fmt.Errorf("writing stdin: %w", err)

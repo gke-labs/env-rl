@@ -20,14 +20,16 @@ Companion to [architecture](../architecture.md) and [code layout](./code-layout.
 
 ### 3. Spool cursor subscription and concurrency-slot release before exit
 
-- **`guest/process/{service,tracker}.go` (`StreamProcessOutput`, `reap`, `decrementActive`)**:
-  Subscribing after reading misses concurrent disk writes, and marking `PROCESS_STATE_EXITED` before
-  releasing the slot fails chained `StartProcess` calls at `MaxConcurrentProcesses`
-  (`ErrTooManyProcesses`). `StreamProcessOutput` acquires `OutputChanged()` before reading (writers
-  close it under mutex after flushing), and `Tracker.reap` syncs spools and calls
-  `decrementActive()` before setting `PROCESS_STATE_EXITED`, closing `done`, and notifying `output`
-  (`SignalProcess`, `WriteProcessInput`, and `ResizeProcess` can still return `ErrExited` from
-  syscall errors while the slot is held, `#370`).
+- **`guest/process/{service,tracker}.go` (`StreamProcessOutput`, `reap`, `decrementActive`,
+  `waitReaped`)**: Subscribing after reading misses concurrent disk writes, and marking
+  `PROCESS_STATE_EXITED` before releasing the slot fails chained `StartProcess` calls at
+  `MaxConcurrentProcesses` (`ErrTooManyProcesses`). `StreamProcessOutput` acquires `OutputChanged()`
+  before reading (writers close it under mutex after flushing), and `Tracker.reap` syncs spools and
+  calls `decrementActive()` before setting `PROCESS_STATE_EXITED`, closing `done`, and notifying
+  `output`. `Tracker.Signal` and `Tracker.WriteInput` call `waitReaped` before they return
+  `ErrExited` from a syscall error (`ESRCH`, `EPIPE`, `os.ErrClosed`), and `WriteInput` releases
+  `stdinMu` first because `reap` takes it before it closes `done` (`#370`). `ResizeProcess` returns
+  `Internal` in that window instead (`#444`).
 
 ## Server networking and Substrate boundaries
 

@@ -920,6 +920,85 @@ func TestConcurrencySlotRace(t *testing.T) {
 	}
 }
 
+// TestSlotIsFreeWhenSignalReportsExit signals a process until Signal reports
+// ErrExited and then starts the next one: at MaxConcurrentProcesses = 1 that
+// start succeeds only if the exited process no longer holds its slot (WF-14,
+// #370). On a fast disk one chain can miss the window between cmd.Wait and the
+// slot release in reap, so the test runs 20 chains.
+func TestSlotIsFreeWhenSignalReportsExit(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	cfg.MaxConcurrentProcesses = 1
+	tracker, err := NewTracker(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker.Close)
+
+	proc, err := tracker.Start(StartOptions{Command: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for chain := 0; chain < 20; chain++ {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			err := tracker.Signal(proc.ProcessID, 0)
+			if errors.Is(err, ErrExited) {
+				break
+			}
+			if err != nil {
+				t.Fatalf("chain %d: Signal failed: %v", chain, err)
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("chain %d: Signal did not report the exit after 10 s", chain)
+			}
+		}
+		proc, err = tracker.Start(StartOptions{Command: []string{"true"}})
+		if err != nil {
+			t.Fatalf("chain %d: Signal reported the exit but the process still held its slot: %v", chain, err)
+		}
+	}
+}
+
+// TestSlotIsFreeWhenWriteInputReportsExit writes to the stdin of a process
+// until WriteInput reports ErrExited (from EPIPE, or from the stdin pipe that
+// cmd.Wait closed) and then starts the next one: at MaxConcurrentProcesses = 1
+// that start succeeds only if the exited process no longer holds its slot
+// (WF-14, #370). 20 chains, as in TestSlotIsFreeWhenSignalReportsExit.
+func TestSlotIsFreeWhenWriteInputReportsExit(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	cfg.MaxConcurrentProcesses = 1
+	tracker, err := NewTracker(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker.Close)
+
+	opts := StartOptions{Command: []string{"true"}, Stdin: true}
+	proc, err := tracker.Start(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for chain := 0; chain < 20; chain++ {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			_, err := tracker.WriteInput(proc.ProcessID, []byte("x"))
+			if errors.Is(err, ErrExited) {
+				break
+			}
+			if err != nil {
+				t.Fatalf("chain %d: WriteInput failed: %v", chain, err)
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("chain %d: WriteInput did not report the exit after 10 s", chain)
+			}
+		}
+		proc, err = tracker.Start(opts)
+		if err != nil {
+			t.Fatalf("chain %d: WriteInput reported the exit but the process still held its slot: %v", chain, err)
+		}
+	}
+}
+
 // A service that a command starts in the background with its output
 // redirected outlives the command: the command's exit is reported at once,
 // and the timeout of the command, which kills the process group, does not
