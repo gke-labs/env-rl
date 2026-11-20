@@ -9,7 +9,7 @@ pull requests below are merged.
 
 ## Where the code lives
 
-- `ai-on-gke/sandboxenv-rl`: the reporter (`cmd/ate-env-reporter`), the snapshot schema
+- `gke-labs/env-rl`: the reporter (`cmd/ate-env-reporter`), the snapshot schema
   (`internal/inventory`), the site (`cmd/ate-env-fleet-site`), the collector and PodMonitoring
   manifests (`ate-env manifest collector` and `--pod-monitoring`, in `cmd/ate-env`), the Terraform
   for the central project (`deploy/fleet-site/`), and `docs/fleet-site.md`. The reporter reuses

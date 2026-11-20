@@ -890,7 +890,7 @@ handlers run synchronous teardown on the main thread, a signal arriving while
 non-reentrant backend or observer locks are held can hang; processes should
 allow fallback termination via `SIGKILL` if necessary. `AsyncSandboxFleet`
 refuses `exit_hooks=True` with a `ValueError`
-([#398](https://github.com/ai-on-gke/sandboxenv-rl/issues/398)), because the
+([#398](https://github.com/gke-labs/env-rl/issues/31)), because the
 hooks run the sync teardown, which cannot reach clients that belong to the
 caller's event loop. Tear an async fleet down yourself:
 

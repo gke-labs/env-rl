@@ -733,7 +733,7 @@ def main() -> None:
     ctx_parser.add_argument("--tag", required=True, help="Target release tag (e.g. v0.1.0)")
     ctx_parser.add_argument("--previous-tag", help="Previous release tag to diff against")
     ctx_parser.add_argument("--target-commitish", help="Commitish value to tag (branch or SHA, defaults to HEAD)")
-    ctx_parser.add_argument("--repo", help="GitHub repo owner/name (e.g. ai-on-gke/sandboxenv-rl)")
+    ctx_parser.add_argument("--repo", help="GitHub repo owner/name (e.g. gke-labs/env-rl)")
     ctx_parser.add_argument(
         "--skip-pypi",
         action="store_true",
@@ -758,7 +758,7 @@ def main() -> None:
     )
     draft_parser.add_argument("--target-commitish", help="Target commitish to tag (defaults to HEAD)")
     draft_parser.add_argument("--remote", default="origin", help="Git remote to push tag to (default: origin)")
-    draft_parser.add_argument("--repo", help="GitHub repo owner/name (e.g. ai-on-gke/sandboxenv-rl)")
+    draft_parser.add_argument("--repo", help="GitHub repo owner/name (e.g. gke-labs/env-rl)")
     draft_parser.add_argument(
         "--skip-pypi",
         action="store_true",

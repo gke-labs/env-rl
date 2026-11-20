@@ -40,7 +40,7 @@ Append-only. Each entry: date, who, what, why.
 - 2026-10-30, orchestrator: a thin custom Go service rather than Grafana. Grafana needs a database
   and does not fit Cloud Run; depth links go to Cloud Monitoring dashboards.
 - 2026-10-30, orchestrator, tentative: reporter, schema, site, manifests and Terraform live in
-  `ai-on-gke/sandboxenv-rl` because the reporter reuses `internal/ate` and the site reuses the
+  `gke-labs/env-rl` because the reporter reuses `internal/ate` and the site reuses the
   schema package. The alternative is a separate repository; the maintainers decide at the first pull
   request.
 - 2026-10-30, orchestrator, tentative: the site is Go with the standard library, server-rendered
@@ -48,7 +48,7 @@ Append-only. Each entry: date, who, what, why.
 - 2026-10-30, open: the central project, the bucket name, the Google group, the cluster list,
   whether Cloud Trace is enabled in each cluster project, and whether every user sees every
   namespace.
-- 2026-11-02, orchestrator: the plan is proposed to `ai-on-gke/sandboxenv-rl` under
+- 2026-11-02, orchestrator: the plan is proposed to `gke-labs/env-rl` under
   `docs/plans/sandbox-fleet-site/`, as the telemetry plan was in #189, so maintainers can object to
   the design before the first code pull request. The notes repository keeps the 2026-10-30 draft.
 - 2026-11-03, orchestrator: the schema package is `internal/inventory`, not the planned

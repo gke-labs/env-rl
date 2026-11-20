@@ -9,22 +9,17 @@ The module path is a separate decision (README D8 of the Go client parity plan).
 `github.com/agent-substrate/env` on the public proxy resolves to the previous repository, so point
 the module at this repository with a `replace` directive.
 
-`github.com/ai-on-gke/sandboxenv-rl` is a private repository. `GOPRIVATE` makes `go` fetch it
-directly from GitHub and skip `proxy.golang.org` and `sum.golang.org` for it. Git needs credentials
-that can read the repository (for example `gh auth setup-git`, or an SSH `insteadOf` rule). Then
-resolve it (Go 1.27 or later):
+`github.com/gke-labs/env-rl` is a public repository, so `go` resolves it through `proxy.golang.org`
+like any other module (Go 1.27 or later):
 
 ```bash
-go env -w 'GOPRIVATE=github.com/ai-on-gke/*'
-go mod edit -replace github.com/agent-substrate/env=github.com/ai-on-gke/sandboxenv-rl@main
+go mod edit -replace github.com/agent-substrate/env=github.com/gke-labs/env-rl@main
 go mod tidy
 ```
 
-`go env -w` replaces any `GOPRIVATE` you already set; list both, comma-separated, if you have one.
-Set `GOPRIVATE` before `go mod tidy`. Without it, `go` asks `proxy.golang.org` first, which still
-serves `@main` from the last time the repository was public, and `go mod tidy` pins that old commit
-without an error. Check the pseudo-version that `go mod tidy` writes in the `replace` line against
-the current `main`.
+Check the pseudo-version that `go mod tidy` writes in the `replace` line against the current `main`.
+A `GOPRIVATE=github.com/ai-on-gke/*` setting from the previous private repository
+(`ai-on-gke/sandboxenv-rl`) is no longer needed.
 
 `go mod tidy` pins `@main` to a pseudo-version. To build against a local clone instead, use
 `go mod edit -replace github.com/agent-substrate/env=/path/to/sandboxenv-rl`.

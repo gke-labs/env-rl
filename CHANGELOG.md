@@ -45,10 +45,11 @@ user needs to know across them.
   records no `release` phase for it. Before, each call went to the backend
   again. A release that failed, was interrupted or was cancelled can be called
   again.
-- Go client: the install steps in `clients/go/README.md` set
-  `GOPRIVATE=github.com/ai-on-gke/*`, because the repository is private.
-  Without it, `go mod tidy` takes `@main` from `proxy.golang.org`, which
-  still serves the commit from before the repository became private.
+- The repository moved from `ai-on-gke/sandboxenv-rl` to `gke-labs/env-rl`
+  and is public. Container images are published under
+  `ghcr.io/gke-labs/env-rl/*` from the next release, and the Go client install
+  steps in `clients/go/README.md` replace the module with
+  `github.com/gke-labs/env-rl@main` and no longer need `GOPRIVATE`.
 - Python client: the `Env.shell` span (`ate_env_client.shell`) records
   `ate_env.timed_out`, as Go's `Env.Run` span does. The span keeps its name.
 - `bench prewarm` ensures each image's derived template through

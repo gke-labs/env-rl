@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-on-gke.github.io/sandboxenv-rl/schema/v1/system_description.schema.json",
+  "$id": "https://gke-labs.github.io/env-rl/schema/v1/system_description.schema.json",
   "title": "SystemDescription",
   "type": "object",
   "additionalProperties": false,

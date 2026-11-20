@@ -40,7 +40,7 @@ const SchemaVersion = "v1"
 // SnapshotSchema is the embedded JSON Schema file for Snapshot.
 const SnapshotSchema = "snapshot.schema.json"
 
-const baseSchemaURI = "https://ai-on-gke.github.io/sandboxenv-rl/schema/inventory/v1/"
+const baseSchemaURI = "https://gke-labs.github.io/env-rl/schema/inventory/v1/"
 
 // SchemaFS embeds the JSON Schema v1 files under v1/.
 //

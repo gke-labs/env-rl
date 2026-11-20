@@ -5,7 +5,7 @@ A release of `sandboxenv-rl` is anchored to a semantic version tag `vX.Y.Z` (or 
 | Deliverable | Distribution Channel | Verification / Security |
 | :--- | :--- | :--- |
 | **Go CLI (`ate-env`)** | GitHub Release static binaries (`ate-env_<tag>_<os>_<arch>`, download and `chmod +x`) for Linux and macOS (`amd64`, `arm64`) | `SHA256SUMS_<tag>.txt` & Cosign Sigstore bundles (`.sigstore.json`) |
-| **Container Images** (`ate-env-api`, `ate-env-guest`) | GitHub Container Registry (`ghcr.io/ai-on-gke/sandboxenv-rl/*`) | Multi-arch (`linux/amd64`, `linux/arm64`), pinned by digest, and signed with Cosign keyless signatures bound to GitHub Actions OIDC |
+| **Container Images** (`ate-env-api`, `ate-env-guest`) | GitHub Container Registry (`ghcr.io/gke-labs/env-rl/*`) | Multi-arch (`linux/amd64`, `linux/arm64`), pinned by digest, and signed with Cosign keyless signatures bound to GitHub Actions OIDC |
 | **Python Client SDK (`ate-env-rl`)** | PyPI when `vars.PYPI_PUBLISH_ENABLED=true`, or Git tag install otherwise (`clients/python`; packages under `integrations/` are in-repo reference integrations/examples and are not released to PyPI) | Built with `setuptools-scm>=8` and published via PyPA OIDC Trusted Publishing (`id-token: write`, environment `pypi`) |
 | **gRPC Contracts & Protos** | Git repository tags & GitHub Release notes | Wire-compatible Protocol Buffers (`proto/ateenv/v1alpha`) |
 
@@ -39,8 +39,8 @@ Container images are multi-platform (`linux/amd64`, `linux/arm64`) and signed us
 ```bash
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/ai-on-gke/sandboxenv-rl/\.github/workflows/release\.yaml@refs/tags/' \
-  ghcr.io/ai-on-gke/sandboxenv-rl/ate-env-guest@sha256:<digest>
+  --certificate-identity-regexp '^https://github.com/gke-labs/env-rl/\.github/workflows/release\.yaml@refs/tags/' \
+  ghcr.io/gke-labs/env-rl/ate-env-guest@sha256:<digest>
 ```
 
 The same command verifies `ate-env-api`; replace only the image reference. A valid signature proves the image was built by this repository's `release` workflow from a tag: the certificate identity names `.github/workflows/release.yaml` at a `refs/tags/` ref, so a signature from another workflow or a branch run does not verify.
@@ -53,7 +53,7 @@ Release CLI binaries, `images_<tag>.txt`, and `SHA256SUMS_<tag>.txt` carry detac
 cosign verify-blob \
   --bundle SHA256SUMS_v0.1.0.txt.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/ai-on-gke/sandboxenv-rl/\.github/workflows/release\.yaml@refs/tags/' \
+  --certificate-identity-regexp '^https://github.com/gke-labs/env-rl/\.github/workflows/release\.yaml@refs/tags/' \
   SHA256SUMS_v0.1.0.txt
 sha256sum -c --ignore-missing SHA256SUMS_v0.1.0.txt
 ```
@@ -70,7 +70,7 @@ The release cutting process can be run directly by a maintainer or delegated to 
 4. Agent / Maintainer: Run `create-release.py draft`, which pushes the annotated `vX.Y.Z` Git tag and creates a Draft GitHub Release with the approved release notes.
 5. CI (`publish` job): Automatically runs on the pushed tag, building and signing container images, compiling `ate-env` binaries, and attaching the 12 assets and `## Images` digest table to the Draft Release.
 6. Human (Checkpoint 2 — Officiate Release): Inspect the Draft Release assets and `## Images` digest table on GitHub and click **Publish release**.
-7. CI (`publish-pypi` job, optional): When repository variable `PYPI_PUBLISH_ENABLED` is set to `true`, automatically runs on release publication, building `ate-env-rl` (`clients/python`), verifying its built wheel/sdist version matches the release tag, and publishing to PyPI via OIDC Trusted Publishing. When `PYPI_PUBLISH_ENABLED` is unset or `false` (for example, before PyPI Trusted Publishing credentials are configured), `publish-pypi` skips cleanly and users install `ate-env-rl` from the Git tag (`pip install "git+https://github.com/ai-on-gke/sandboxenv-rl.git@<tag>#subdirectory=clients/python"`).
+7. CI (`publish-pypi` job, optional): When repository variable `PYPI_PUBLISH_ENABLED` is set to `true`, automatically runs on release publication, building `ate-env-rl` (`clients/python`), verifying its built wheel/sdist version matches the release tag, and publishing to PyPI via OIDC Trusted Publishing. When `PYPI_PUBLISH_ENABLED` is unset or `false` (for example, before PyPI Trusted Publishing credentials are configured), `publish-pypi` skips cleanly and users install `ate-env-rl` from the Git tag (`pip install "git+https://github.com/gke-labs/env-rl.git@<tag>#subdirectory=clients/python"`).
 
 ### Detailed Commands
 
@@ -108,7 +108,7 @@ gh run list --workflow release.yaml
 To republish an existing tag after a transient failure, trigger `release.yaml` manually from the **Actions** tab: select the tag in **Use workflow from: Tag `vX.Y.Z`** and enter the same `vX.Y.Z` tag as the `tag` input. The workflow refuses any ref other than `refs/tags/<tag>` so the keyless OIDC signature identity matches the verification command above. Because the run executes the workflow file committed at that tag, a fix to `release.yaml` on `main` requires cutting a new tag. Republishing rebuilds the images (producing new digests) and replaces the Draft Release assets and `## Images` block rather than duplicating them.
 
 #### Publish Release and Snowball to PyPI
-Open `https://github.com/ai-on-gke/sandboxenv-rl/releases`, review the draft release notes, the 12 attached files (`4` `ate-env` binaries, `images_<tag>.txt`, `SHA256SUMS_<tag>.txt`, and `6` `.sigstore.json` bundles), and the `## Images` table, then click **Publish release**.
+Open `https://github.com/gke-labs/env-rl/releases`, review the draft release notes, the 12 attached files (`4` `ate-env` binaries, `images_<tag>.txt`, `SHA256SUMS_<tag>.txt`, and `6` `.sigstore.json` bundles), and the `## Images` table, then click **Publish release**.
 
 ## First-Time Repository Setup & Publishing Operations
 
@@ -131,8 +131,8 @@ Both PR validation (`ci-release` in [`nix/ci.nix`](../nix/ci.nix)) and release p
 Automatic PyPI upload on release publication is **opt-in** via the `PYPI_PUBLISH_ENABLED=true` Actions variable. Until PyPI Trusted Publishing is configured, leave `PYPI_PUBLISH_ENABLED` unset so clicking **Publish release** officiates GHCR images and `ate-env` CLI binaries without failing on `publish-pypi`.
 
 1. **Configuring the Trusted Publisher & Enabling Uploads**: On [pypi.org](https://pypi.org) under **Publishing**, register a GitHub publisher (or a **Pending Publisher** prior to `ate-env-rl`'s very first PyPI upload) with:
-   - **Owner**: `ai-on-gke`
-   - **Repository**: `sandboxenv-rl`
+   - **Owner**: `gke-labs`
+   - **Repository**: `env-rl`
    - **Workflow name**: `release.yaml`
    - **Environment name**: `pypi`
    No long-lived PyPI API tokens or secrets are stored in GitHub. Once the `pypi` GitHub Environment and Trusted Publisher are in place, set repository variable `PYPI_PUBLISH_ENABLED` to `true` under **Settings -> Secrets and variables -> Actions -> Variables**.

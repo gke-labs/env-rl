@@ -55,5 +55,5 @@ Does this change add or widen any of these?
 
 If you checked one of the first four boxes, link a short design note with the threat it adds and
 its mitigation, and update
-[`docs/security/threat-model.md`](https://github.com/ai-on-gke/sandboxenv-rl/blob/main/docs/security/threat-model.md)
+[`docs/security/threat-model.md`](https://github.com/gke-labs/env-rl/blob/main/docs/security/threat-model.md)
 in this pull request.

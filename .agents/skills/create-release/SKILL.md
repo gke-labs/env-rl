@@ -17,7 +17,7 @@ Every `sandboxenv-rl` release produces four core deliverables:
 | Deliverable                                           | Distribution Channel                                                                                                                                                             | Verification / Security                                                                    |
 | :---------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------- |
 | **Go CLI (`ate-env`)**                                | GitHub Release static binaries (`ate-env_<tag>_<os>_<arch>`, `chmod +x`)                                                                                                         | `SHA256SUMS_${TAG}.txt` & Cosign Sigstore bundles (`.sigstore.json`)                       |
-| **Container Images** (`ate-env-api`, `ate-env-guest`) | GitHub Container Registry (`ghcr.io/ai-on-gke/sandboxenv-rl/*`)                                                                                                                  | Multi-arch (`linux/amd64`, `linux/arm64`), pinned by digest, and signed with Cosign OIDC   |
+| **Container Images** (`ate-env-api`, `ate-env-guest`) | GitHub Container Registry (`ghcr.io/gke-labs/env-rl/*`)                                                                                                                  | Multi-arch (`linux/amd64`, `linux/arm64`), pinned by digest, and signed with Cosign OIDC   |
 | **Python Client SDK (`ate-env-rl`)**                  | PyPI when `vars.PYPI_PUBLISH_ENABLED=true`, or Git tag install when PyPI is skipped (`clients/python`; packages under `integrations/` are in-repo examples and are not released) | `setuptools-scm>=8` & PyPA OIDC Trusted Publishing (`id-token: write`, environment `pypi`) |
 | **gRPC Contracts & Protos**                           | Git repository tags & GitHub Release notes                                                                                                                                       | Protocol buffer wire compatibility                                                         |
 
@@ -122,7 +122,7 @@ This command:
        (`* Description of feature or fix (#<pr_number>)`).
    - **Full Changelog**: Include the categorized list or compare URL from the generated notes.
    - **Installation**: Substitute `$TAG` into the CLI and GHCR/`cosign verify` blocks (adjusting
-     `ai-on-gke/sandboxenv-rl` to `<owner>/<repo>` if cutting a release on a fork). For
+     `gke-labs/env-rl` to `<owner>/<repo>` if cutting a release on a fork). For
      `#### Python Client SDK`:
      - **When PyPI publishing is enabled** (`vars.PYPI_PUBLISH_ENABLED=true` and not skipped):
        substitute `$VERSION` into `pip install "ate-env-rl==$VERSION"`.
@@ -218,8 +218,8 @@ cleanly without running `publish-pypi`.
 2. **Trusted Publisher Registration (`pypi.org`) & Enabling Automatic Uploads**: Register a GitHub
    Trusted Publisher (or a **Pending Publisher** prior to the very first PyPI upload) for
    `ate-env-rl` on [pypi.org](https://pypi.org) under **Publishing**:
-   - **Owner**: `ai-on-gke`
-   - **Repository**: `sandboxenv-rl`
+   - **Owner**: `gke-labs`
+   - **Repository**: `env-rl`
    - **Workflow name**: `release.yaml`
    - **Environment name**: `pypi` (matching `environment: pypi` on the `publish-pypi` job) Once
      configured, set repository variable `PYPI_PUBLISH_ENABLED` to `true` so future published

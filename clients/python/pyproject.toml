@@ -56,7 +56,7 @@ metrics = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ai-on-gke/sandboxenv-rl"
+Homepage = "https://github.com/gke-labs/env-rl"
 
 [tool.setuptools_scm]
 root = "../.."

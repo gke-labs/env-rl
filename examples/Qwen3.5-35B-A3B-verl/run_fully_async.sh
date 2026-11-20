@@ -24,7 +24,7 @@ export PYTHONUNBUFFERED=1 HF_HOME=/workspace/hf HF_HUB_ENABLE_HF_TRANSFER=1 CUDA
        VLLM_ALLREDUCE_USE_SYMM_MEM=0 VLLM_DISABLE_COMPILE_CACHE=1 TORCH_NCCL_AVOID_RECORD_STREAMS=1 HYDRA_FULL_ERROR=1
 : "${ROLE:=head}"; : "${NNODES:=2}"; : "${NODE_WAIT_S:=3600}"; : "${RAY_HEAD_HOST:=verl-qwen3p5-35b-swe-head.default.svc}"; : "${RAY_PORT:=6379}"
 : "${UNI_AGENT_REF:=174b040}"                                     # uni-agent commit; its verl submodule is the verl pin (3efe38c7)
-: "${ATE_ENV_CLIENT_REF:=}"   # optional ai-on-gke/sandboxenv-rl git ref; empty installs /workspace/cfg/ate-env-rl.tgz bundled by deploy.sh
+: "${ATE_ENV_CLIENT_REF:=}"   # optional gke-labs/env-rl git ref; empty installs /workspace/cfg/ate-env-rl.tgz bundled by deploy.sh
 : "${MODEL_REVISION:=59d61f3c}"   # Hugging Face commit of MODEL_ID
 : "${ENV_PREFIX:=verl-qwen3p5-35b}"
 : "${MODEL_ID:=Qwen/Qwen3.5-35B-A3B}"
@@ -81,11 +81,11 @@ for mod in ("megatron.bridge.models.conversion.auto_bridge", "swebench.harness.g
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-c", "/workspace/pins.txt", pkg])
 PY
 if [ -n "$ATE_ENV_CLIENT_REF" ]; then
-  pip install -q "git+https://github.com/ai-on-gke/sandboxenv-rl.git@${ATE_ENV_CLIENT_REF}#subdirectory=clients/python" 2>&1 | tail -1
+  pip install -q "git+https://github.com/gke-labs/env-rl.git@${ATE_ENV_CLIENT_REF}#subdirectory=clients/python" 2>&1 | tail -1
 elif [ -f /workspace/cfg/ate-env-rl.tgz ]; then
   mkdir -p /workspace/agent/ate-env-rl && tar -C /workspace/agent/ate-env-rl -xzf /workspace/cfg/ate-env-rl.tgz && pip install -q /workspace/agent/ate-env-rl 2>&1 | tail -1
 else
-  pip install -q "git+https://github.com/ai-on-gke/sandboxenv-rl.git@main#subdirectory=clients/python" 2>&1 | tail -1
+  pip install -q "git+https://github.com/gke-labs/env-rl.git@main#subdirectory=clients/python" 2>&1 | tail -1
 fi
 tar -C /workspace/agent -xzf /workspace/cfg/uni-agent-substrate.tgz && pip install -q --no-deps -e /workspace/agent/uni-agent 2>&1 | tail -1
 echo "import uni_agent_substrate._register" > "$(python3 -c 'import site; print(site.getsitepackages()[0])')/uni_agent_substrate.pth"

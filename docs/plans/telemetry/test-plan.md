@@ -127,7 +127,7 @@ For AC-10 the golden test is the check; to refresh the golden file on purpose ru
 go run ./hack/metrics-docs | diff -u docs/metrics.md - && echo "metrics docs fresh"
 grep -n '^#' docs/observability.md
 grep -n -iE 'tracing|metrics|extras|metrics-docs' .github/workflows/ci.yaml
-gh pr checks <PR number> -R ai-on-gke/sandboxenv-rl
+gh pr checks <PR number> -R gke-labs/env-rl
 ```
 
 ## 7. Blast radius and overhead (AC-14)

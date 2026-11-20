@@ -379,16 +379,16 @@ def test_fl5_forked_child_does_not_tear_down_the_parent_run():
 
 
 def test_fl5_async_fleet_refuses_exit_hooks():
-    with pytest.raises(ValueError, match="issues/398"):
+    with pytest.raises(ValueError, match="issues/31"):
         AsyncSandboxFleet(FleetConfig(backend="mock", exit_hooks=True))
-    with pytest.raises(ValueError, match="issues/398"):
+    with pytest.raises(ValueError, match="issues/31"):
         AsyncSandboxFleet(FleetConfig(backend="substrate", exit_hooks=True))
     # Also for a sync fleet passed in (made in a child, since it installs hooks).
     r = _run("""
         try:
             AsyncSandboxFleet(sync_fleet=hooked(TrackingDriver()))
         except ValueError as e:
-            say("refused" if "issues/398" in str(e) else str(e))
+            say("refused" if "issues/31" in str(e) else str(e))
     """)
     assert _lines(r)[0] == "refused", r.stderr
 

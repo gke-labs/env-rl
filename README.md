@@ -191,12 +191,12 @@ You need a cluster with Agent Substrate at or after
 bucket, `kubectl` with `kubectl-ate`, Go (`1.27` or later), [ko](https://ko.build), and Python
 `3.10` or later for the SDK. The latest
 release is
-[`v0.1.0`](https://github.com/ai-on-gke/sandboxenv-rl/releases/tag/v0.1.0) (2026-11-07);
+[`v0.1.0`](https://github.com/gke-labs/env-rl/releases/tag/v0.1.0) (2026-11-07);
 [docs/release.md](./docs/release.md) lists what a release publishes. `main` has changed after it,
 thus the steps below build the CLI and images from source:
 
 ```bash
-git clone https://github.com/ai-on-gke/sandboxenv-rl && cd sandboxenv-rl
+git clone https://github.com/gke-labs/env-rl && cd sandboxenv-rl
 go install github.com/google/ko@latest
 go install ./cmd/ate-env
 make images ATE_ENV_IMAGE_REPO=<registry>   # prints --guest-image and --api-image

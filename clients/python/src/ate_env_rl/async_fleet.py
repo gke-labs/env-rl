@@ -73,7 +73,7 @@ class AsyncSandboxFleet:
             # clients that belong to the caller's event loop.
             raise ValueError(
                 "AsyncSandboxFleet does not support FleetConfig(exit_hooks=True) "
-                "(https://github.com/ai-on-gke/sandboxenv-rl/issues/398); await "
+                "(https://github.com/gke-labs/env-rl/issues/31); await "
                 "fleet.teardown() in a try/finally, or from a handler that "
                 "loop.add_signal_handler installs"
             )

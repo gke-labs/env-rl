@@ -117,7 +117,7 @@ buckets are the Python ones, with `source="direct"`. Registration is idempotent 
 ### D8. Out of this plan
 
 The Go module path (`github.com/agent-substrate/env` in `go.mod`, for a repository that lives at
-`ai-on-gke/sandboxenv-rl`) is a separate decision; PR 1 makes the client importable from another
+`gke-labs/env-rl`) is a separate decision; PR 1 makes the client importable from another
 module under either path. Also out: TLS to `ate-env-api`, a port-proxy client, the MCP surface and
 the benchmark trace-file mode.
 

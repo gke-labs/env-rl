@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-on-gke.github.io/sandboxenv-rl/schema/inventory/v1/snapshot.schema.json",
+  "$id": "https://gke-labs.github.io/env-rl/schema/inventory/v1/snapshot.schema.json",
   "title": "InventorySnapshot",
   "description": "One cluster's ate-env inventory at one instant: atespaces, actor templates, tags, WorkerPools, workers, actors and ate-env-api Deployments. Written by the per-cluster reporter, read by the fleet site.",
   "type": "object",

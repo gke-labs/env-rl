@@ -1,6 +1,6 @@
 # Research: inventory at seconds resolution, and traces
 
-Date: 2026-10-30. Code read: `ai-on-gke/sandboxenv-rl` at `3b03b03` (2026-10-29) and
+Date: 2026-10-30. Code read: `gke-labs/env-rl` at `3b03b03` (2026-10-29) and
 `agent-substrate/substrate` at `28520c0d` (2026-10-27). Cloud facts from the vendor documents linked
 at the end.
 
@@ -150,7 +150,7 @@ needs only that Substrate's components and the ate-env collector export to the s
 
 ## Audit of main, 2026-11-09
 
-Checked against `ai-on-gke/sandboxenv-rl` at `f10c68c` and the Substrate `go.mod` requires,
+Checked against `gke-labs/env-rl` at `f10c68c` and the Substrate `go.mod` requires,
 `274605f1f2a8` (Substrate `main` was at `94e0a26a`). What moved since the first read, and what it
 changes in the plan:
 
@@ -198,7 +198,7 @@ changes in the plan:
 
 ## Audit of main, 2026-11-10
 
-Checked against `ai-on-gke/sandboxenv-rl` at `3dd8bab2`, with pull request 2 on top; the Substrate
+Checked against `gke-labs/env-rl` at `3dd8bab2`, with pull request 2 on top; the Substrate
 `go.mod` requires is unchanged, `274605f1f2a8`. The seven steps of the drift check:
 
 1. `env.proto` has the same nine RPCs; the change since `f10c68c` is comments on `WarmImage` (#304).
@@ -222,7 +222,7 @@ the control plane does.
 
 ## Audit of main, 2026-11-16
 
-Checked against `ai-on-gke/sandboxenv-rl` at `66b0e526`, with pull request 3 on top; the Substrate
+Checked against `gke-labs/env-rl` at `66b0e526`, with pull request 3 on top; the Substrate
 `go.mod` requires is unchanged, `274605f1f2a8`. The seven steps of the drift check:
 
 1. `env.proto` has the same nine RPCs. No call enumerates environments on `main`. Open pull request
@@ -262,7 +262,7 @@ Pull request 3 is rebased onto `9fed77fc`. What moved since `66b0e526`:
 
 ## Audit of main, 2026-11-16, after pull requests 3 and 4 merged
 
-Checked against `ai-on-gke/sandboxenv-rl` at `a12f48a0`. Pull requests 3 and 4 are on `main` as #415
+Checked against `gke-labs/env-rl` at `a12f48a0`. Pull requests 3 and 4 are on `main` as #415
 (`f548c13b`) and #416 (`b4d69141`). What moved since `9fed77fc`:
 
 1. `env.proto` is unchanged: ten RPCs, and `ListEnvironments` reads one page of one atespace per
@@ -283,7 +283,7 @@ request 6.
 
 ## Audit of main, 2026-11-17
 
-Checked against `ai-on-gke/sandboxenv-rl` at `8d110751`, for pull request 5a. Since `a12f48a0`:
+Checked against `gke-labs/env-rl` at `8d110751`, for pull request 5a. Since `a12f48a0`:
 Substrate moved to `v1.0.0` (`78068ee8`), whose runtime packages equal `274605f1`; #417, #423, #424
 and #433 change nothing the plan reads. The seven steps:
 
@@ -306,7 +306,7 @@ and #433 change nothing the plan reads. The seven steps:
 
 ## Audit of main, 2026-11-17, after pull request 5a merged
 
-Checked against `ai-on-gke/sandboxenv-rl` at `36e07232`, for pull request 5b. Since `8d110751`: #434
+Checked against `gke-labs/env-rl` at `36e07232`, for pull request 5b. Since `8d110751`: #434
 is pull request 5a; #404 changes the SWE-bench loader's pre-flight, and in
 `internal/benchmarking/schema` only `preflight_coverage.go`, next to which pull request 5b adds
 `folder.go`; #420 adds `--domains` and `--node-selector` to `ate-env manifest` and a `workerpool`
@@ -326,7 +326,7 @@ subcommand, which also has `--domain-offset`. The seven steps:
 
 ## Audit of main, 2026-11-18, for pull request 2c
 
-Checked against `ai-on-gke/sandboxenv-rl` at `7e03d2b9`, for pull request 2c. Since `36e07232`, the
+Checked against `gke-labs/env-rl` at `7e03d2b9`, for pull request 2c. Since `36e07232`, the
 last audit: #437 (`7e03d2b9`) is pull request 5b; #436 and #439 change the SWE-bench loader's
 pre-flight knobs; #438 changes the Harbor provider; `220e9586` pools `ate-env-api`'s router
 connections, adds `-reactive-wake` and a `request_id` to the guest's `StartProcessRequest`; #440
@@ -348,7 +348,7 @@ changes one `internal/apiservice` test. The seven steps:
 
 ## Audit of main, 2026-11-18, for pull request 7
 
-Checked against `ai-on-gke/sandboxenv-rl` at `a0c6024f`, for pull request 7. Since `7e03d2b9`, the
+Checked against `gke-labs/env-rl` at `a0c6024f`, for pull request 7. Since `7e03d2b9`, the
 last audit: #442 (`ba056deb`) is pull request 2c; #441 changes `.github/CODEOWNERS` only. The seven
 steps:
 

@@ -45,7 +45,7 @@ func CheckVersion(v string) error {
 	return checkSchemaVersion(v)
 }
 
-const baseSchemaURI = "https://ai-on-gke.github.io/sandboxenv-rl/schema/v1/"
+const baseSchemaURI = "https://gke-labs.github.io/env-rl/schema/v1/"
 
 // SchemaFS embeds the canonical JSON Schema v1 files under v1/.
 //
