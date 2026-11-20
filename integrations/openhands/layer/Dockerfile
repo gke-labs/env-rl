@@ -63,12 +63,12 @@ RUN case "${TARGETARCH}" in \
     mkdir -p /tmp/oh; \
     tar -xzf "/tmp/${f}" -C /tmp/oh
 
-FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
 # Debian 13. Its own glibc does not matter: uv selects wheels for the target
 # platform, and the slim image has no compiler, so a native package without a
 # suitable wheel fails here instead of linking against this builder.
-FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS build
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS build
 
 ARG TARGETARCH
 ARG AGENT_SERVER_VERSION=1.55.0
