@@ -853,7 +853,7 @@ user needs to know across them.
 
 ### Fixed
 - ate-env-guest: `SignalProcess` and `WriteProcessInput` report that a
-  process has exited only after its concurrency slot is free (#370).
+  process has exited only after its concurrency slot is free (#25).
   Before, they could return `FailedPrecondition` ("has exited") from the
   error of a system call (`ESRCH`, `EPIPE`, a closed pipe or PTY) while the
   slot was still held, or while the process still ran, and a

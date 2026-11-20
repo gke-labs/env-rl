@@ -34,12 +34,12 @@ Companion to [architecture](../architecture.md) and [code layout](./code-layout.
   `output`. A syscall error (`ESRCH`, `EPIPE`, `os.ErrClosed`) does not prove an exit: it can arrive
   before the slot release, or from a process that still runs. `Tracker.Signal` and
   `Tracker.WriteInput` then wait for `reap` (`waitReaped`) and return `ErrExited` only once `reap`
-  has released the slot (`#370`). If `reap` has not finished within `reapWaitTimeout` (a slow spool
+  has released the slot (`#25`). If `reap` has not finished within `reapWaitTimeout` (a slow spool
   sync, or a descendant outside the group that still holds the output pipes, so `cmd.Wait` does not
   return), `WriteInput` returns `ErrStdinClosed` and `Signal` returns `nil` (nothing is left to
   signal), as `GetProcess` still reports the process as running. `WriteInput` releases `stdinMu`
   before it waits, because `reap` takes it before it closes `done`. `ResizeProcess` returns
-  `Internal` in that window instead (`#444`).
+  `Internal` in that window instead (`#37`).
 
 ## Server networking and Substrate boundaries
 

@@ -190,7 +190,7 @@ func (p *ProcessState) Exited() bool {
 func (p *ProcessState) Done() <-chan struct{} { return p.done }
 
 // reapWaitTimeout bounds how long Signal and WriteInput wait for reap once a
-// system call error shows that the process is gone (#370).
+// system call error shows that the process is gone (#25).
 const reapWaitTimeout = time.Second
 
 // errReapWaitTimeout is returned by waitReaped when reap has not closed done
@@ -566,8 +566,8 @@ func (t *Tracker) reap(state *ProcessState, cmd *exec.Cmd, stdoutFile, stderrFil
 	// SignalProcess and WriteProcessInput can see the exit before this
 	// line, from the error of a system call (ESRCH, EPIPE, a closed pipe or
 	// PTY), so they wait for reap (waitReaped) before they report ErrExited
-	// (#370).
-	// ResizeProcess returns an Internal error in that window instead (#444).
+	// (#25).
+	// ResizeProcess returns an Internal error in that window instead (#37).
 	t.decrementActive()
 
 	state.mu.Lock()
@@ -680,7 +680,7 @@ func (t *Tracker) Signal(ctx context.Context, processID string, sig syscall.Sign
 	if !errors.Is(err, os.ErrProcessDone) {
 		return fmt.Errorf("sending %v: %w", sig, err)
 	}
-	// The process is gone, which can be before reap releases the slot (#370).
+	// The process is gone, which can be before reap releases the slot (#25).
 	switch err := state.waitReaped(ctx); {
 	case err == nil:
 		return ErrExited
@@ -710,7 +710,7 @@ func (t *Tracker) WriteInput(ctx context.Context, processID string, data []byte)
 	// waits for reap to close done, and reap takes
 	// stdinMu to mark stdin closed before it closes done. Waiting with
 	// stdinMu held would stall reap until reapWaitTimeout, and for a PTY
-	// before reap has even released the concurrency slot (#370).
+	// before reap has even released the concurrency slot (#25).
 	state.stdinMu.Lock()
 	if state.stdinClosed {
 		state.stdinMu.Unlock()
@@ -733,7 +733,7 @@ func (t *Tracker) WriteInput(ctx context.Context, processID string, data []byte)
 	// os.ErrClosed: cmd.Wait closed the stdin pipe, or reap closed the PTY
 	// master, after the process exited. EPIPE also arrives when a running
 	// process closed its own stdin. Both can arrive before reap releases the
-	// slot (#370).
+	// slot (#25).
 	switch err := state.waitReaped(ctx); {
 	case err == nil:
 		return n, ErrExited

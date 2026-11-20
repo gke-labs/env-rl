@@ -924,7 +924,7 @@ func TestConcurrencySlotRace(t *testing.T) {
 // TestSlotIsFreeWhenSignalReportsExit signals a process until Signal reports
 // ErrExited and then starts the next one: at MaxConcurrentProcesses = 1 that
 // start succeeds only if the exited process no longer holds its slot (WF-14,
-// #370). On a fast disk one chain can miss the window between cmd.Wait and the
+// #25). On a fast disk one chain can miss the window between cmd.Wait and the
 // slot release in reap, so the test runs 20 chains.
 func TestSlotIsFreeWhenSignalReportsExit(t *testing.T) {
 	cfg := DefaultConfig(t.TempDir())
@@ -964,7 +964,7 @@ func TestSlotIsFreeWhenSignalReportsExit(t *testing.T) {
 // until WriteInput reports ErrExited (from EPIPE, or from the stdin pipe that
 // cmd.Wait closed) and then starts the next one: at MaxConcurrentProcesses = 1
 // that start succeeds only if the exited process no longer holds its slot
-// (WF-14, #370). 20 chains, as in TestSlotIsFreeWhenSignalReportsExit.
+// (WF-14, #25). 20 chains, as in TestSlotIsFreeWhenSignalReportsExit.
 func TestSlotIsFreeWhenWriteInputReportsExit(t *testing.T) {
 	cfg := DefaultConfig(t.TempDir())
 	cfg.MaxConcurrentProcesses = 1
@@ -1002,7 +1002,7 @@ func TestSlotIsFreeWhenWriteInputReportsExit(t *testing.T) {
 
 // TestWriteInputToProcessThatClosedStdinIsNotExited writes to a process that
 // closed its own stdin and keeps running: WriteInput gets EPIPE but must not
-// report ErrExited, because the process still holds its slot (WF-14, #370).
+// report ErrExited, because the process still holds its slot (WF-14, #25).
 func TestWriteInputToProcessThatClosedStdinIsNotExited(t *testing.T) {
 	tracker, err := NewTracker(DefaultConfig(t.TempDir()))
 	if err != nil {
@@ -1132,7 +1132,7 @@ func TestRPCErrorMapsContextErrors(t *testing.T) {
 // TestSignalReachesProcessThatLeftItsGroup signals a process that moved itself
 // into another process group and keeps running: kill(-pid) gets ESRCH, but the
 // signal must still reach the process instead of Signal reporting ErrExited
-// (WF-14, #370). The process joins the group of its own child, whose output
+// (WF-14, #25). The process joins the group of its own child, whose output
 // goes to /dev/null so that it cannot hold up reap, and the cleanup kills that
 // group.
 func TestSignalReachesProcessThatLeftItsGroup(t *testing.T) {
@@ -1202,7 +1202,7 @@ time.sleep(30)
 // return. Neither call may report ErrExited. Signal returns the caller's
 // context error at once, or nil after reapWaitTimeout, since nothing is left
 // to signal. WriteInput returns ErrStdinClosed. Both match GetProcess, which
-// still reports the process as running (WF-14, #370).
+// still reports the process as running (WF-14, #25).
 func TestSignalAndWriteInputWhileDescendantHoldsOutput(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
