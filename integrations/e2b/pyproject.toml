@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-asyncio>=1.0"]  # pytest-asyncio: the async tests
+test = ["pytest>=8", "pytest-asyncio>=1.5.0"]  # pytest-asyncio: the async tests
 
 [tool.setuptools.packages.find]
 where = ["src"]
