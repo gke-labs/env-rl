@@ -234,7 +234,7 @@ func (s *Service) WriteProcessInput(stream grpc.ClientStreamingServer[ateenvv1al
 			}
 		}
 		if len(req.GetData()) > 0 {
-			n, err := s.tracker.WriteInput(processID, req.GetData())
+			n, err := s.tracker.WriteInput(stream.Context(), processID, req.GetData())
 			total += int64(n)
 			if err != nil {
 				return rpcError(err, processID)
@@ -252,8 +252,10 @@ func (s *Service) WriteProcessInput(stream grpc.ClientStreamingServer[ateenvv1al
 	return stream.SendAndClose(&ateenvv1alpha.WriteProcessInputResponse{BytesWritten: total})
 }
 
-// SignalProcess delivers a signal to the process group and returns the
-// process state right after delivery.
+// SignalProcess delivers a signal to the process group (or to the process
+// itself once it left its group) and returns the process state right after
+// delivery. For a process that is gone while its exit is not recorded yet,
+// nothing is delivered and the state still reads RUNNING.
 func (s *Service) SignalProcess(ctx context.Context, req *ateenvv1alpha.SignalProcessRequest) (*ateenvv1alpha.Process, error) {
 	s.setGuestCapsTrailer(ctx)
 	state, err := s.lookup(req.GetProcessId())
@@ -264,7 +266,7 @@ func (s *Service) SignalProcess(ctx context.Context, req *ateenvv1alpha.SignalPr
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported signal %v", req.GetSignal())
 	}
-	if err := s.tracker.Signal(req.GetProcessId(), sig); err != nil {
+	if err := s.tracker.Signal(ctx, req.GetProcessId(), sig); err != nil {
 		return nil, rpcError(err, req.GetProcessId())
 	}
 	return state.ToProto(), nil
@@ -321,6 +323,8 @@ func rpcError(err error, processID string) error {
 		return status.Errorf(codes.FailedPrecondition, "process %q was started without a tty", processID)
 	case errors.Is(err, ErrTooManyProcesses):
 		return status.Errorf(codes.ResourceExhausted, "%v; wait for running processes to exit or signal them", err)
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return status.FromContextError(err).Err()
 	default:
 		return status.Errorf(codes.Internal, "%v", err)
 	}

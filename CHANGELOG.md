@@ -853,12 +853,19 @@ user needs to know across them.
 
 ### Fixed
 - ate-env-guest: `SignalProcess` and `WriteProcessInput` report that a
-  process has exited only after its concurrency slot is free, waiting up to
-  a second for the guest to release it. Before, they could return
-  `FailedPrecondition` ("has exited") from the error of a system call
-  (`ESRCH`, `EPIPE`, a closed pipe or PTY) while the slot was still held,
-  and a `StartProcess` that followed at `MaxConcurrentProcesses` got
-  `ResourceExhausted` (#370).
+  process has exited only after its concurrency slot is free (#370).
+  Before, they could return `FailedPrecondition` ("has exited") from the
+  error of a system call (`ESRCH`, `EPIPE`, a closed pipe or PTY) while the
+  slot was still held, or while the process still ran, and a
+  `StartProcess` that followed at `MaxConcurrentProcesses` got
+  `ResourceExhausted`. On such an error they now wait up to a second for
+  the guest to record the exit, and end that wait with `Canceled` or
+  `DeadlineExceeded` when the caller's context ends. If the exit is not
+  recorded by then, `WriteProcessInput` returns "stdin ... is closed" and
+  `SignalProcess` succeeds, since nothing is left to signal.
+  `SignalProcess` also reaches a process that moved to another process
+  group and left its old group empty, so a kill and the timeout now end
+  it.
 - swebench-loader: the step loop's park (`-mode steps` without `-strategy`
   and without the working-set flags) sends a suspend again when it fails
   with a transient error: gRPC `Unavailable`, `DeadlineExceeded`, `Unknown`,

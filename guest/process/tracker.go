@@ -15,6 +15,7 @@
 package process
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -174,6 +175,7 @@ type ProcessState struct {
 	done     chan struct{}
 	timer    *time.Timer
 	timedOut atomic.Bool // set when the timeout fired and killed the process
+	proc     *os.Process // cmd.Process, set before reap starts
 }
 
 // Exited reports whether the process has been reaped.
@@ -191,14 +193,28 @@ func (p *ProcessState) Done() <-chan struct{} { return p.done }
 // system call error shows that the process is gone (#370).
 const reapWaitTimeout = time.Second
 
-// waitReaped waits, for at most reapWaitTimeout, until reap has released the
-// concurrency slot and closed done. Callers that report ErrExited from a
-// system call error (ESRCH, EPIPE, a closed file) call it first, because that
-// error can arrive between cmd.Wait and the slot release in reap.
-func (p *ProcessState) waitReaped() {
+// errReapWaitTimeout is returned by waitReaped when reap has not closed done
+// within reapWaitTimeout.
+var errReapWaitTimeout = errors.New("reap did not finish within reapWaitTimeout")
+
+// waitReaped waits until reap has released the concurrency slot and closed
+// done. It returns nil once done is closed, ctx.Err() if the caller's context
+// ends first, and errReapWaitTimeout after reapWaitTimeout.
+func (p *ProcessState) waitReaped(ctx context.Context) error {
 	select {
 	case <-p.done:
-	case <-time.After(reapWaitTimeout):
+		return nil
+	default:
+	}
+	timer := time.NewTimer(reapWaitTimeout)
+	defer timer.Stop()
+	select {
+	case <-p.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return errReapWaitTimeout
 	}
 }
 
@@ -464,6 +480,7 @@ func (t *Tracker) Start(opts StartOptions) (*ProcessState, error) {
 		go copyPTY(state.ptmx, &cappedWriter{w: stdoutFile, limit: 0, onWrite: state.output.notify}, state.ptyDone)
 	}
 	state.Pid = cmd.Process.Pid
+	state.proc = cmd.Process
 
 	timeout := opts.Timeout
 	if timeout <= 0 {
@@ -472,7 +489,7 @@ func (t *Tracker) Start(opts StartOptions) (*ProcessState, error) {
 	if timeout > 0 {
 		state.timer = time.AfterFunc(timeout, func() {
 			state.timedOut.Store(true)
-			_ = t.Signal(processID, syscall.SIGKILL)
+			_ = t.Signal(context.Background(), processID, syscall.SIGKILL)
 		})
 	}
 
@@ -548,7 +565,8 @@ func (t *Tracker) reap(state *ProcessState, cmd *exec.Cmd, stdoutFile, stderrFil
 	// Nothing runs in the slot any more: Wait has reaped the process.
 	// SignalProcess and WriteProcessInput can see the exit before this
 	// line, from the error of a system call (ESRCH, EPIPE, a closed pipe or
-	// PTY), so they call waitReaped before they report ErrExited (#370).
+	// PTY), so they wait for reap (waitReaped) before they report ErrExited
+	// (#370).
 	// ResizeProcess returns an Internal error in that window instead (#444).
 	t.decrementActive()
 
@@ -621,8 +639,14 @@ func (t *Tracker) Get(processID string) (*ProcessState, error) {
 	return p, nil
 }
 
-// Signal delivers sig to the process group of a running process.
-func (t *Tracker) Signal(processID string, sig syscall.Signal) error {
+// Signal delivers sig to the process group of a running process, or to the
+// process itself once it left its group and the group is empty. When the
+// process turns out to be gone, Signal waits for reap, bounded by ctx and
+// reapWaitTimeout: it returns ErrExited once reap has released the slot, and
+// nil if reap has not recorded the exit by then. A process that left its group
+// while descendants stayed in it is not reached: kill(-pid) succeeds on the
+// descendants.
+func (t *Tracker) Signal(ctx context.Context, processID string, sig syscall.Signal) error {
 	state, err := t.Get(processID)
 	if err != nil {
 		return err
@@ -638,20 +662,42 @@ func (t *Tracker) Signal(processID string, sig syscall.Signal) error {
 
 	// Negative PID targets the whole process group (the leader's PGID == PID
 	// thanks to Setpgid).
-	if err := syscall.Kill(-pid, sig); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			// ESRCH arrives once cmd.Wait has reaped the process, which can
-			// be before reap releases the slot (#370).
-			state.waitReaped()
-			return ErrExited
-		}
+	err = syscall.Kill(-pid, sig)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("sending %v: %w", sig, err)
 	}
-	return nil
+	// No process is left in the group, but the process itself can still run
+	// after moving to another group (setpgid). Signal it directly: os.Process
+	// signals through a pidfd, or, without one, Process.Wait marks the process
+	// done before wait4 reaps it, so this never reaches a reused PID.
+	err = state.proc.Signal(sig)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("sending %v: %w", sig, err)
+	}
+	// The process is gone, which can be before reap releases the slot (#370).
+	switch err := state.waitReaped(ctx); {
+	case err == nil:
+		return ErrExited
+	case errors.Is(err, errReapWaitTimeout):
+		// reap has not recorded the exit, for example because a descendant
+		// outside the group still holds the output. Nothing is left to
+		// signal, and GetProcess still reports the process as running, so
+		// this is not an exit either (WF-14).
+		return nil
+	default:
+		return err
+	}
 }
 
-// WriteInput writes data to the stdin of a process started with Stdin.
-func (t *Tracker) WriteInput(processID string, data []byte) (int, error) {
+// WriteInput writes data to the stdin of a process started with Stdin. ctx
+// bounds the wait for reap when the write finds stdin broken.
+func (t *Tracker) WriteInput(ctx context.Context, processID string, data []byte) (int, error) {
 	state, err := t.Get(processID)
 	if err != nil {
 		return 0, err
@@ -661,7 +707,7 @@ func (t *Tracker) WriteInput(processID string, data []byte) (int, error) {
 	}
 
 	// stdinMu is unlocked explicitly, not with defer: the error path below
-	// calls waitReaped, which waits for reap to close done, and reap takes
+	// waits for reap to close done, and reap takes
 	// stdinMu to mark stdin closed before it closes done. Waiting with
 	// stdinMu held would stall reap until reapWaitTimeout, and for a PTY
 	// before reap has even released the concurrency slot (#370).
@@ -675,17 +721,33 @@ func (t *Tracker) WriteInput(processID string, data []byte) (int, error) {
 	}
 	n, err := state.stdin.Write(data)
 	state.stdinMu.Unlock()
-	if err != nil {
-		// os.ErrClosed: cmd.Wait closed the stdin pipe, or reap closed the
-		// PTY master, after the process exited. EPIPE and os.ErrClosed can
-		// arrive before reap releases the slot (#370).
-		if state.Exited() || errors.Is(err, syscall.EPIPE) || errors.Is(err, os.ErrClosed) {
-			state.waitReaped()
-			return n, ErrExited
-		}
+	if err == nil {
+		return n, nil
+	}
+	if state.Exited() {
+		return n, ErrExited
+	}
+	if !errors.Is(err, syscall.EPIPE) && !errors.Is(err, os.ErrClosed) {
 		return n, fmt.Errorf("writing stdin: %w", err)
 	}
-	return n, nil
+	// os.ErrClosed: cmd.Wait closed the stdin pipe, or reap closed the PTY
+	// master, after the process exited. EPIPE also arrives when a running
+	// process closed its own stdin. Both can arrive before reap releases the
+	// slot (#370).
+	switch err := state.waitReaped(ctx); {
+	case err == nil:
+		return n, ErrExited
+	case errors.Is(err, errReapWaitTimeout):
+		// reap has not recorded an exit: the process runs, or a descendant
+		// still holds its output. Its stdin takes no input either way, and
+		// later writes fail at once instead of waiting again.
+		state.stdinMu.Lock()
+		state.stdinClosed = true
+		state.stdinMu.Unlock()
+		return n, ErrStdinClosed
+	default:
+		return n, err
+	}
 }
 
 // CloseInput closes the stdin of a process, delivering EOF. It is idempotent.

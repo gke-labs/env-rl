@@ -21,6 +21,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -941,7 +942,7 @@ func TestSlotIsFreeWhenSignalReportsExit(t *testing.T) {
 	for chain := 0; chain < 20; chain++ {
 		deadline := time.Now().Add(10 * time.Second)
 		for {
-			err := tracker.Signal(proc.ProcessID, 0)
+			err := tracker.Signal(context.Background(), proc.ProcessID, 0)
 			if errors.Is(err, ErrExited) {
 				break
 			}
@@ -981,7 +982,7 @@ func TestSlotIsFreeWhenWriteInputReportsExit(t *testing.T) {
 	for chain := 0; chain < 20; chain++ {
 		deadline := time.Now().Add(10 * time.Second)
 		for {
-			_, err := tracker.WriteInput(proc.ProcessID, []byte("x"))
+			_, err := tracker.WriteInput(context.Background(), proc.ProcessID, []byte("x"))
 			if errors.Is(err, ErrExited) {
 				break
 			}
@@ -996,6 +997,295 @@ func TestSlotIsFreeWhenWriteInputReportsExit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("chain %d: WriteInput reported the exit but the process still held its slot: %v", chain, err)
 		}
+	}
+}
+
+// TestWriteInputToProcessThatClosedStdinIsNotExited writes to a process that
+// closed its own stdin and keeps running: WriteInput gets EPIPE but must not
+// report ErrExited, because the process still holds its slot (WF-14, #370).
+func TestWriteInputToProcessThatClosedStdinIsNotExited(t *testing.T) {
+	tracker, err := NewTracker(DefaultConfig(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker.Close)
+
+	proc, err := tracker.Start(StartOptions{Command: []string{"sh", "-c", "exec 0<&-; sleep 30"}, Stdin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-proc.Pid, syscall.SIGKILL) })
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, err = tracker.WriteInput(context.Background(), proc.ProcessID, []byte("x"))
+		if err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("WriteInput did not fail after 10 s")
+		}
+	}
+	if errors.Is(err, ErrExited) {
+		t.Fatalf("WriteInput reported the exit of a running process: %v", err)
+	}
+	if !errors.Is(err, ErrStdinClosed) {
+		t.Fatalf("WriteInput failed: %v, want ErrStdinClosed", err)
+	}
+	if proc.Exited() {
+		t.Fatal("the process exited, but the test needs it running")
+	}
+
+	begin := time.Now()
+	if _, err := tracker.WriteInput(context.Background(), proc.ProcessID, []byte("x")); !errors.Is(err, ErrStdinClosed) {
+		t.Fatalf("second WriteInput: %v, want ErrStdinClosed", err)
+	}
+	if took := time.Since(begin); took >= reapWaitTimeout/2 {
+		t.Fatalf("second WriteInput took %v, but it should fail without waiting for reap", took)
+	}
+}
+
+// TestWriteInputWaitEndsWithCallerContext writes to a running process that
+// closed its stdin with a cancelled context: the wait for reap ends at once
+// with the context's error, not after reapWaitTimeout, and never as an exit
+// (WF-14).
+func TestWriteInputWaitEndsWithCallerContext(t *testing.T) {
+	tracker, err := NewTracker(DefaultConfig(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker.Close)
+
+	proc, err := tracker.Start(StartOptions{Command: []string{"sh", "-c", "exec 0<&-; sleep 30"}, Stdin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-proc.Pid, syscall.SIGKILL) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	deadline := time.Now().Add(10 * time.Second)
+	var took time.Duration
+	for {
+		begin := time.Now()
+		_, err = tracker.WriteInput(ctx, proc.ProcessID, []byte("x"))
+		took = time.Since(begin)
+		if err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("WriteInput did not fail after 10 s")
+		}
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("WriteInput: %v, want context.Canceled", err)
+	}
+	if took >= reapWaitTimeout/2 {
+		t.Fatalf("WriteInput took %v with a cancelled context", took)
+	}
+}
+
+// TestWaitReaped checks the three ways the wait for reap ends: done closed
+// (also when the context has ended too), the caller's context ending, and
+// reapWaitTimeout. Only the first lets a caller report ErrExited (WF-14).
+func TestWaitReaped(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := (&ProcessState{done: done}).waitReaped(ctx); err != nil {
+		t.Errorf("done closed: %v, want nil", err)
+	}
+	if err := (&ProcessState{done: make(chan struct{})}).waitReaped(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled context: %v, want context.Canceled", err)
+	}
+	begin := time.Now()
+	if err := (&ProcessState{done: make(chan struct{})}).waitReaped(context.Background()); !errors.Is(err, errReapWaitTimeout) {
+		t.Errorf("no exit: %v, want errReapWaitTimeout", err)
+	}
+	if took := time.Since(begin); took < reapWaitTimeout {
+		t.Errorf("no exit: returned after %v, want at least %v", took, reapWaitTimeout)
+	}
+}
+
+// TestRPCErrorMapsContextErrors checks the status code of the caller's own
+// context ending during the wait for reap (WF-14): Canceled or
+// DeadlineExceeded, without "has exited", which clients read as an exit.
+func TestRPCErrorMapsContextErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want codes.Code
+	}{
+		{context.Canceled, codes.Canceled},
+		{context.DeadlineExceeded, codes.DeadlineExceeded},
+	} {
+		st := status.Convert(rpcError(tc.err, "proc-x"))
+		if st.Code() != tc.want {
+			t.Errorf("rpcError(%v) = %v, want %v", tc.err, st.Code(), tc.want)
+		}
+		if strings.Contains(st.Message(), "has exited") {
+			t.Errorf("rpcError(%v) message %q says the process has exited", tc.err, st.Message())
+		}
+	}
+}
+
+// TestSignalReachesProcessThatLeftItsGroup signals a process that moved itself
+// into another process group and keeps running: kill(-pid) gets ESRCH, but the
+// signal must still reach the process instead of Signal reporting ErrExited
+// (WF-14, #370). The process joins the group of its own child, whose output
+// goes to /dev/null so that it cannot hold up reap, and the cleanup kills that
+// group.
+func TestSignalReachesProcessThatLeftItsGroup(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not found")
+	}
+	tracker, err := NewTracker(DefaultConfig(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker.Close)
+
+	proc, err := tracker.Start(StartOptions{Command: []string{python, "-c", `
+import os, time
+r, w = os.pipe()
+child = os.fork()
+if child == 0:
+    null = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(null, fd)
+    os.setpgid(0, 0)
+    os.write(w, b"x")
+    time.sleep(30)
+    os._exit(0)
+os.read(r, 1)
+os.setpgid(0, child)
+time.sleep(30)
+`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proc.proc.Kill() })
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		pgid, err := syscall.Getpgid(proc.Pid)
+		if err == nil && pgid != proc.Pid {
+			t.Cleanup(func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the process did not leave its process group")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := tracker.Signal(context.Background(), proc.ProcessID, syscall.SIGKILL); err != nil {
+		t.Fatalf("Signal to a running process that left its group: %v, want nil", err)
+	}
+	select {
+	case <-proc.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the signal did not reach the process")
+	}
+	proc.mu.RLock()
+	sig := proc.Signal
+	proc.mu.RUnlock()
+	if sig != syscall.SIGKILL {
+		t.Fatalf("the process ended with signal %v, want SIGKILL", sig)
+	}
+}
+
+// TestSignalAndWriteInputWhileDescendantHoldsOutput covers a process that is
+// gone while reap has not recorded its exit: its child moved to its own
+// session and still holds the output pipes, so cmd.Wait in reap does not
+// return. Neither call may report ErrExited. Signal returns the caller's
+// context error at once, or nil after reapWaitTimeout, since nothing is left
+// to signal. WriteInput returns ErrStdinClosed. Both match GetProcess, which
+// still reports the process as running (WF-14, #370).
+func TestSignalAndWriteInputWhileDescendantHoldsOutput(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not found")
+	}
+	tracker, err := NewTracker(DefaultConfig(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker.Close)
+
+	proc, err := tracker.Start(StartOptions{Stdin: true, Command: []string{python, "-c", `
+import os, time
+r, w = os.pipe()
+child = os.fork()
+if child == 0:
+    os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
+    os.setsid()
+    os.write(w, b"x")
+    time.sleep(30)
+    os._exit(0)
+os.read(r, 1)
+print(child, flush=True)
+`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The child's PID, printed by the process, is its session's process group.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		out, _, err := ReadSpool(proc.StdoutPath, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if child, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && strings.HasSuffix(string(out), "\n") {
+			t.Cleanup(func() { _ = syscall.Kill(-child, syscall.SIGKILL) })
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the process did not print its child's PID, stdout %q", out)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Wait until cmd.Wait has reaped the process itself.
+	for !errors.Is(proc.proc.Signal(syscall.Signal(0)), os.ErrProcessDone) {
+		if time.Now().After(deadline) {
+			t.Fatal("the process did not exit")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Without a pidfd, os.Process reports the process done just before wait4
+	// reaps it, while kill(-pid) can still reach the zombie and return nil.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var took time.Duration
+	for {
+		begin := time.Now()
+		err = tracker.Signal(ctx, proc.ProcessID, 0)
+		took = time.Since(begin)
+		if err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Signal with a cancelled context kept returning nil")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Signal with a cancelled context: %v, want context.Canceled", err)
+	}
+	if took >= reapWaitTimeout/2 {
+		t.Fatalf("Signal with a cancelled context took %v", took)
+	}
+	if err := tracker.Signal(context.Background(), proc.ProcessID, 0); err != nil {
+		t.Fatalf("Signal: %v, want nil", err)
+	}
+	if _, err := tracker.WriteInput(context.Background(), proc.ProcessID, []byte("x")); !errors.Is(err, ErrStdinClosed) {
+		t.Fatalf("WriteInput: %v, want ErrStdinClosed", err)
+	}
+	if proc.Exited() {
+		t.Fatal("reap recorded the exit, but the test needs the child to hold the output")
 	}
 }
 

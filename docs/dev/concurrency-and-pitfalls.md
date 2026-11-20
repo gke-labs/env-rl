@@ -16,7 +16,12 @@ Companion to [architecture](../architecture.md) and [code layout](./code-layout.
 - **`guest/process/tracker.go` (`Setpgid`, `Tracker.Signal`, `Tracker.Start`),
   `guest/process/pty_linux.go` (`Setsid`), `cmd/ate-env-guest/sidecar.go`**: Signaling only the
   parent PID leaves child trees running; non-PTYs set `Setpgid: true` and PTYs `Setsid: true`, and
-  `(*Service).SignalProcess` and timeouts call `Tracker.Signal` (`syscall.Kill(-pid, sig)`).
+  `(*Service).SignalProcess` and timeouts call `Tracker.Signal` (`syscall.Kill(-pid, sig)`). A
+  process can leave its group (`setpgid`), so when the group is empty `Tracker.Signal` signals the
+  process itself through `os.Process`. That signals through a pidfd, or, without one, `Process.Wait`
+  marks the process done before `wait4` reaps it, so it never reaches a reused PID. A process that
+  left its group while descendants stayed in it is not reached, because `kill(-pid)` succeeds on the
+  descendants.
 
 ### 3. Spool cursor subscription and concurrency-slot release before exit
 
@@ -26,9 +31,14 @@ Companion to [architecture](../architecture.md) and [code layout](./code-layout.
   `MaxConcurrentProcesses` (`ErrTooManyProcesses`). `StreamProcessOutput` acquires `OutputChanged()`
   before reading (writers close it under mutex after flushing), and `Tracker.reap` syncs spools and
   calls `decrementActive()` before setting `PROCESS_STATE_EXITED`, closing `done`, and notifying
-  `output`. `Tracker.Signal` and `Tracker.WriteInput` call `waitReaped` before they return
-  `ErrExited` from a syscall error (`ESRCH`, `EPIPE`, `os.ErrClosed`), and `WriteInput` releases
-  `stdinMu` first because `reap` takes it before it closes `done` (`#370`). `ResizeProcess` returns
+  `output`. A syscall error (`ESRCH`, `EPIPE`, `os.ErrClosed`) does not prove an exit: it can arrive
+  before the slot release, or from a process that still runs. `Tracker.Signal` and
+  `Tracker.WriteInput` then wait for `reap` (`waitReaped`) and return `ErrExited` only once `reap`
+  has released the slot (`#370`). If `reap` has not finished within `reapWaitTimeout` (a slow spool
+  sync, or a descendant outside the group that still holds the output pipes, so `cmd.Wait` does not
+  return), `WriteInput` returns `ErrStdinClosed` and `Signal` returns `nil` (nothing is left to
+  signal), as `GetProcess` still reports the process as running. `WriteInput` releases `stdinMu`
+  before it waits, because `reap` takes it before it closes `done`. `ResizeProcess` returns
   `Internal` in that window instead (`#444`).
 
 ## Server networking and Substrate boundaries
