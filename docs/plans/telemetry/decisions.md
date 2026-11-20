@@ -2,8 +2,8 @@
 
 Append-only. Each entry: date, who, what, why.
 
-- 2026-10-21, orchestrator: the target asked for as "substrateenv-rl" is `gke-labs/env-rl`;
-  no repository of the other name exists. All plan documents name the real repository.
+- 2026-10-21, orchestrator: the target asked for as "substrateenv-rl" is `gke-labs/env-rl`; no
+  repository of the other name exists. All plan documents name the real repository.
 - 2026-10-21, orchestrator: plan documents live in a notes repository rather than in the target,
   because the target is a shared public project; only code, tests and user-facing docs go there.
 - 2026-10-21, lead (seeded): W3C trace context travels in gRPC metadata rather than in object

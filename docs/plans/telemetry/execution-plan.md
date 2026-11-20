@@ -3,12 +3,11 @@
 Status: complete; all six pull requests are merged. Written 2026-10-21; revised 2026-11-02 after
 #186 merged as `9c30be1`.
 
-Goal: `gke-labs/env-rl` gains the three telemetry layers agent-sandbox has (always-on run
-report, Prometheus metrics, OpenTelemetry traces) across the Python client, the fleet,
-`ate-env-api`, the Go client, the guest and the benchmarks, with the same design properties:
-optional dependencies behind complete no-op fallbacks, one trace from the trainer to the Substrate
-control plane, bounded metric labels, and docs generated from the definitions. Design and mapping:
-[README.md](./README.md).
+Goal: `gke-labs/env-rl` gains the three telemetry layers agent-sandbox has (always-on run report,
+Prometheus metrics, OpenTelemetry traces) across the Python client, the fleet, `ate-env-api`, the Go
+client, the guest and the benchmarks, with the same design properties: optional dependencies behind
+complete no-op fallbacks, one trace from the trainer to the Substrate control plane, bounded metric
+labels, and docs generated from the definitions. Design and mapping: [README.md](./README.md).
 
 Stop condition: every acceptance criterion in [acceptance-criteria.md](./acceptance-criteria.md)
 holds on `main`, the reviewer has no open blocking finding, and the pull requests are merged with
@@ -30,7 +29,7 @@ Tests section of each pull request and CI. [decisions.md](./decisions.md) record
 
 | Item                     | Value                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Repository               | `https://github.com/gke-labs/env-rl`, default branch `main`. Plan written against `8ff5c3e` (2026-10-21); this revision describes `3b03b03` (2026-10-29).                                                                                                                                                                                             |
+| Repository               | `https://github.com/gke-labs/env-rl`, default branch `main`. Plan written against `8ff5c3e` (2026-10-21); this revision describes `3b03b03` (2026-10-29).                                                                                                                                                                                                     |
 | Branches                 | `telemetry-pr1` (#93), `telemetry-pr2` (#109), `telemetry-pr2-ac-fixes` (#113), `telemetry-pr3` (#114), `telemetry-pr4` (#150), `python-rpc-semconv` (#164), `telemetry-pr5` (#168), `telemetry-pr6` (#186).                                                                                                                                                  |
 | Python                   | 3.12 in CI; floor 3.10 in `clients/python/pyproject.toml`. Venvs: `pip install -e 'clients/python[dev]'` and `pip install -e 'clients/python[dev,tracing,metrics]'`.                                                                                                                                                                                          |
 | Go                       | the module's `go.mod` toolchain; `go test ./...` from the repository root.                                                                                                                                                                                                                                                                                    |

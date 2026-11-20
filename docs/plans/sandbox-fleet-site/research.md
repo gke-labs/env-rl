@@ -150,9 +150,9 @@ needs only that Substrate's components and the ate-env collector export to the s
 
 ## Audit of main, 2026-11-09
 
-Checked against `gke-labs/env-rl` at `f10c68c` and the Substrate `go.mod` requires,
-`274605f1f2a8` (Substrate `main` was at `94e0a26a`). What moved since the first read, and what it
-changes in the plan:
+Checked against `gke-labs/env-rl` at `f10c68c` and the Substrate `go.mod` requires, `274605f1f2a8`
+(Substrate `main` was at `94e0a26a`). What moved since the first read, and what it changes in the
+plan:
 
 - `ate-env-api` gained `GetImageStatus`, `EnsureImageTemplate`, `ListPlacementDomains` and
   `WarmImage`, and `Environment` gained `node` and `worker_selector` (#207, #209, #235). Still no
@@ -198,8 +198,8 @@ changes in the plan:
 
 ## Audit of main, 2026-11-10
 
-Checked against `gke-labs/env-rl` at `3dd8bab2`, with pull request 2 on top; the Substrate
-`go.mod` requires is unchanged, `274605f1f2a8`. The seven steps of the drift check:
+Checked against `gke-labs/env-rl` at `3dd8bab2`, with pull request 2 on top; the Substrate `go.mod`
+requires is unchanged, `274605f1f2a8`. The seven steps of the drift check:
 
 1. `env.proto` has the same nine RPCs; the change since `f10c68c` is comments on `WarmImage` (#304).
    No call enumerates environments.
@@ -222,8 +222,8 @@ the control plane does.
 
 ## Audit of main, 2026-11-16
 
-Checked against `gke-labs/env-rl` at `66b0e526`, with pull request 3 on top; the Substrate
-`go.mod` requires is unchanged, `274605f1f2a8`. The seven steps of the drift check:
+Checked against `gke-labs/env-rl` at `66b0e526`, with pull request 3 on top; the Substrate `go.mod`
+requires is unchanged, `274605f1f2a8`. The seven steps of the drift check:
 
 1. `env.proto` has the same nine RPCs. No call enumerates environments on `main`. Open pull request
    #392 adds `ListEnvironments`, one atespace page per call; when it lands, the reporter still lists
@@ -283,9 +283,9 @@ request 6.
 
 ## Audit of main, 2026-11-17
 
-Checked against `gke-labs/env-rl` at `8d110751`, for pull request 5a. Since `a12f48a0`:
-Substrate moved to `v1.0.0` (`78068ee8`), whose runtime packages equal `274605f1`; #417, #423, #424
-and #433 change nothing the plan reads. The seven steps:
+Checked against `gke-labs/env-rl` at `8d110751`, for pull request 5a. Since `a12f48a0`: Substrate
+moved to `v1.0.0` (`78068ee8`), whose runtime packages equal `274605f1`; #417, #423, #424 and #433
+change nothing the plan reads. The seven steps:
 
 1. `env.proto` has the same ten RPCs.
 2. Substrate `v1.0.0`: the three actor event names in `internal/actorevent` are unchanged, and
@@ -306,11 +306,11 @@ and #433 change nothing the plan reads. The seven steps:
 
 ## Audit of main, 2026-11-17, after pull request 5a merged
 
-Checked against `gke-labs/env-rl` at `36e07232`, for pull request 5b. Since `8d110751`: #434
-is pull request 5a; #404 changes the SWE-bench loader's pre-flight, and in
-`internal/benchmarking/schema` only `preflight_coverage.go`, next to which pull request 5b adds
-`folder.go`; #420 adds `--domains` and `--node-selector` to `ate-env manifest` and a `workerpool`
-subcommand, which also has `--domain-offset`. The seven steps:
+Checked against `gke-labs/env-rl` at `36e07232`, for pull request 5b. Since `8d110751`: #434 is pull
+request 5a; #404 changes the SWE-bench loader's pre-flight, and in `internal/benchmarking/schema`
+only `preflight_coverage.go`, next to which pull request 5b adds `folder.go`; #420 adds `--domains`
+and `--node-selector` to `ate-env manifest` and a `workerpool` subcommand, which also has
+`--domain-offset`. The seven steps:
 
 1. `env.proto` is unchanged.
 2. `go.mod` and `go.sum` are unchanged, so Substrate is still `v1.0.0`; `internal/actorevent` is
@@ -326,11 +326,11 @@ subcommand, which also has `--domain-offset`. The seven steps:
 
 ## Audit of main, 2026-11-18, for pull request 2c
 
-Checked against `gke-labs/env-rl` at `7e03d2b9`, for pull request 2c. Since `36e07232`, the
-last audit: #437 (`7e03d2b9`) is pull request 5b; #436 and #439 change the SWE-bench loader's
-pre-flight knobs; #438 changes the Harbor provider; `220e9586` pools `ate-env-api`'s router
-connections, adds `-reactive-wake` and a `request_id` to the guest's `StartProcessRequest`; #440
-changes one `internal/apiservice` test. The seven steps:
+Checked against `gke-labs/env-rl` at `7e03d2b9`, for pull request 2c. Since `36e07232`, the last
+audit: #437 (`7e03d2b9`) is pull request 5b; #436 and #439 change the SWE-bench loader's pre-flight
+knobs; #438 changes the Harbor provider; `220e9586` pools `ate-env-api`'s router connections, adds
+`-reactive-wake` and a `request_id` to the guest's `StartProcessRequest`; #440 changes one
+`internal/apiservice` test. The seven steps:
 
 1. `env.proto` is unchanged: ten RPCs. `220e9586` changes `guest.proto` only.
 2. `go.mod` and `go.sum` are unchanged, so Substrate is still `v1.0.0`, with the same actor event
@@ -348,8 +348,8 @@ changes one `internal/apiservice` test. The seven steps:
 
 ## Audit of main, 2026-11-18, for pull request 7
 
-Checked against `gke-labs/env-rl` at `a0c6024f`, for pull request 7. Since `7e03d2b9`, the
-last audit: #442 (`ba056deb`) is pull request 2c; #441 changes `.github/CODEOWNERS` only. The seven
+Checked against `gke-labs/env-rl` at `a0c6024f`, for pull request 7. Since `7e03d2b9`, the last
+audit: #442 (`ba056deb`) is pull request 2c; #441 changes `.github/CODEOWNERS` only. The seven
 steps:
 
 1. `env.proto` is unchanged: ten RPCs.

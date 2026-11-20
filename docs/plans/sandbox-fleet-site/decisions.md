@@ -40,8 +40,8 @@ Append-only. Each entry: date, who, what, why.
 - 2026-10-30, orchestrator: a thin custom Go service rather than Grafana. Grafana needs a database
   and does not fit Cloud Run; depth links go to Cloud Monitoring dashboards.
 - 2026-10-30, orchestrator, tentative: reporter, schema, site, manifests and Terraform live in
-  `gke-labs/env-rl` because the reporter reuses `internal/ate` and the site reuses the
-  schema package. The alternative is a separate repository; the maintainers decide at the first pull
+  `gke-labs/env-rl` because the reporter reuses `internal/ate` and the site reuses the schema
+  package. The alternative is a separate repository; the maintainers decide at the first pull
   request.
 - 2026-10-30, orchestrator, tentative: the site is Go with the standard library, server-rendered
   pages, inline SVG, no external assets, in the style of the explorer plan and `build_report.py`.
