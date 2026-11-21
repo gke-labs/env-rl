@@ -8,30 +8,30 @@ Companion to [architecture](../architecture.md) and [code layout](./code-layout.
 
 - **`cmd/ate-env-guest/init_linux.go` (`runIfPID1`, `supervise`)**: `wait4(-1, ...)` races
   `os/exec.Cmd.Wait()` in `guest/process.Tracker`. `ate-env-guest` sets `PR_SET_CHILD_SUBREAPER` and
-  re-execs (`os.StartProcess`) so PID 1 runs `syscall.Wait4(-1, &status, syscall.WNOHANG, nil)` and
-  relays signals.
+  re-execs (`os.StartProcess`) so PID 1 reaps with `syscall.Wait4` (`WNOHANG`) and relays signals.
 
 ### 2. Process groups and negative-PID signal delivery
 
 - **`guest/process/tracker.go` (`Setpgid`, `Tracker.Signal`, `Tracker.Start`),
-  `guest/process/pty_linux.go` (`Setsid`), `cmd/ate-env-guest/sidecar.go`**: Signaling parent PID
-  alone strands children. Non-PTYs set `Setpgid: true`, PTYs `Setsid: true`, and
-  `(*Service).SignalProcess`/timeouts call `Tracker.Signal` (`syscall.Kill(-pid, sig)`). If
-  `setpgid` emptied the group, `Tracker.Signal` signals `os.Process` (pidfd, or `Process.Wait` marks
-  done pre-`wait4` so reused PIDs stay safe); with descendants left, `kill(-pid)` hits them only.
+  `guest/process/pty_linux.go` (`Setsid`), `cmd/ate-env-guest/sidecar.go`**: Signaling only the
+  parent PID strands its children. Non-PTYs set `Setpgid: true`, PTYs `Setsid: true`, and
+  `(*Service).SignalProcess` and timeouts call `Tracker.Signal` (`syscall.Kill(-pid, sig)`). If
+  `setpgid` emptied the group, `Tracker.Signal` signals the process through `os.Process`, which
+  never hits a reused PID. If descendants stay in the old group, `kill(-pid)` reaches only them.
 
 ### 3. Spool cursor subscription and concurrency-slot release before exit
 
 - **`guest/process/{service,tracker}.go` (`StreamProcessOutput`, `reap`, `decrementActive`,
-  `waitReaped`)**: Late subscribe misses writes, and `PROCESS_STATE_EXITED` pre-release fails
-  chained `StartProcess` at `MaxConcurrentProcesses` (`ErrTooManyProcesses`). `StreamProcessOutput`
-  takes `OutputChanged()` first (closed under mutex post-flush), and `Tracker.reap` syncs spools,
-  calling `decrementActive()` before `PROCESS_STATE_EXITED`, `done`, and `output`. As
-  `ESRCH`/`EPIPE`/`os.ErrClosed` hit pre-release/while running, `Tracker.Signal` and
-  `Tracker.WriteInput` (`WriteInput` drops `stdinMu` first as `reap` takes it pre-`done`) call
-  `waitReaped`, returning `ErrExited` only post-release (`#25`). Past `reapWaitTimeout` (slow sync
-  or extra-group pipe in `cmd.Wait`), `WriteInput` returns `ErrStdinClosed` and `Signal` `nil` while
-  `GetProcess` runs (`ResizeProcess`: `Internal`, `#37`).
+  `waitReaped`)**: Subscribing after reading misses writes, and `PROCESS_STATE_EXITED` before the
+  slot release fails chained `StartProcess` at `MaxConcurrentProcesses` (`ErrTooManyProcesses`).
+  `StreamProcessOutput` takes `OutputChanged()` first (writers close it under mutex after flushing),
+  and `Tracker.reap` syncs spools, then calls `decrementActive()` before `PROCESS_STATE_EXITED`,
+  `done`, and `output`. `ESRCH`, `EPIPE`, and `os.ErrClosed` do not prove an exit: they can precede
+  the slot release or come from a live process. So `Tracker.Signal` and `Tracker.WriteInput` (which
+  drops `stdinMu` first, as `reap` takes it before `done`) return `ErrExited` only after
+  `waitReaped` sees the release (`#25`). Past `reapWaitTimeout` (a slow sync, or a descendant
+  outside the group holding the pipes), `WriteInput` returns `ErrStdinClosed` and `Signal` `nil`, as
+  `GetProcess` still reports `RUNNING` (`ResizeProcess`: `Internal`, `#37`).
 
 ## Server networking and Substrate boundaries
 
@@ -52,7 +52,7 @@ Companion to [architecture](../architecture.md) and [code layout](./code-layout.
 - **Wake & replay (`internal/apiservice/{wakeretry,awake_cache,server}.go`, `ensureAwake`,
   `guest/process/idempotency.go`)**: `atenet` resumes actors as `ensureAwake` polls
   `GetProcess("ate-env-wake-probe")` under `DefaultWakeBudget` (5m) and `DefaultWakeRunningBudget`
-  (20s `RUNNING`), returning `Canceled`/`DeadlineExceeded` immediately. The guest dedups
+  (20s once `RUNNING`), returning `Canceled`/`DeadlineExceeded` immediately. The guest dedups
   `StartProcessRequest.request_id` in `idempotencyTable` (`x-ate-env-guest-caps: start-request-id`);
   `-reactive-wake` pairs `AddIfGen`/`Generation`, clears `caps`/bumps gen on `Remove`, keeps
   `expiresAt` on `RecordCap`, and sets `request_id` to replay `StartProcess` once only after
@@ -68,7 +68,7 @@ Companion to [architecture](../architecture.md) and [code layout](./code-layout.
   `WakeNoCapacityGrace` while non-`RUNNING` (default `0` waits `WakeBudget`) returns
   `codes.ResourceExhausted` (`ate-env-start-failure: no-capacity`).
 - **Delete (`internal/ate/client.go`: `Delete`, `evictGuest`)**: `internal/ate.Client.Delete` calls
-  `DeleteActor` in any state (even `CRASHED`, un-suspended) and `evictGuest` (`guestPool`).
+  `DeleteActor` in any state (even `CRASHED`, no pre-suspend) and `evictGuest` (`guestPool`).
 
 ### 6. Idempotent derived `ActorTemplate` creation and failed golden-snapshot recovery
 
