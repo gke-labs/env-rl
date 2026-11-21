@@ -26,10 +26,11 @@ Keep responsibilities strictly separated across layers:
    retries via `ensureAwake`, and forwards requests to `ate-env-guest` over `atenet` via
    `s.guestSession`. Never execute commands or buffer whole files inside `ate-env-api`.
 3. **Router dial paths and wake boundaries (Position A)**: All new gRPC proxy RPCs on `ate-env-api`
-   must dial via `s.guestSession(ctx, atespace, envID, false)`, which executes `s.ensureAwake` and
-   attaches `ate-target-actor`. `internal/ate.Client.DialGuest` is used exclusively by
-   `internal/mcp` and lacks `ensureAwake` (known gap). Never dial `atenet` directly without going
-   through `guestSession` or `DialGuest`.
+   must dial via `s.guestSession(ctx, atespace, envID, forceWake)`, which executes `s.ensureAwake`
+   (or uses `boundedAwakeCache` under `-reactive-wake` when `forceWake` is `false`) and attaches
+   `ate-target-actor`. `internal/ate.Client.DialGuest` is used exclusively by `internal/mcp` and
+   lacks `ensureAwake` (known gap). Never dial `atenet` directly without going through
+   `guestSession` or `DialGuest`.
 4. **`internal/mcp` adapts to guest RPCs**: Tools (`shell`, `read_file`, `write_file`) translate
    JSON inputs into `ProcessService` and `FileSystemService` calls over `DialGuest`. Never bypass
    the guest gRPC interface.
@@ -60,11 +61,22 @@ Keep responsibilities strictly separated across layers:
 
 ### 3. Add the proxy handler in `ate-env-api` (`internal/apiservice/`)
 
-- Add the corresponding handler in `internal/apiservice/server.go`.
-- Dial the guest connection via
-  `conn, outCtx, closeFn, _, err := s.guestSession(ctx, atespace, envID, false)` (which executes
-  `s.ensureAwake` and attaches `ate-target-actor`).
-- Defer `closeFn()` and forward the RPC over the generated client using `outCtx`.
+- Add the corresponding handler in `internal/apiservice/server.go`, extracting `envID, atespace` via
+  `envFromContext(ctx)` (which also stamps `ate.atespace` and `ate.actor.name` on the server span;
+  on lifecycle or template RPCs, call the `setSpan*Attributes` helpers in `span_identity.go`).
+- For unary and server-streaming RPCs, dial via
+  `conn, outCtx, closeFn, fastPath, err := s.guestSession(ctx, atespace, envID, false)` and call
+  `s.evictOnGuestUnavailable(ctx, targetActor, err)` on the forwarded RPC error. When `fastPath` is
+  `true` and `evictOnGuestUnavailable` returns `true` on an idempotent RPC (or before the first
+  chunk of a server stream), redial once with `s.guestSession(ctx, atespace, envID, true)` (for a
+  mutating unary RPC with request-ID deduplication like `StartProcess`, gate replay on
+  `s.hasGuestCap`; non-idempotent RPCs like `SignalProcess` evict without replaying).
+- For client-streaming RPCs (`WriteProcessInput`, `WriteFile`), call `envFromContext(ctx)` first,
+  read the first message via `nextMessage(stream)` before waking the guest, dial with
+  `s.guestSession(ctx, atespace, envID, true)` (consumed streams cannot replay), and call
+  `s.evictOnGuestUnavailable` on stream errors.
+- Always invoke `closeFn()` (swapping `closeFn` when a server-streaming retry redials) and forward
+  over the generated client using `outCtx`.
 
 ### 4. Expose in MCP (`internal/mcp/`)
 
