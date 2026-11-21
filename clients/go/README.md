@@ -22,7 +22,7 @@ A `GOPRIVATE=github.com/ai-on-gke/*` setting from the previous private repositor
 (`ai-on-gke/sandboxenv-rl`) is no longer needed.
 
 `go mod tidy` pins `@main` to a pseudo-version. To build against a local clone instead, use
-`go mod edit -replace github.com/agent-substrate/env=/path/to/sandboxenv-rl`.
+`go mod edit -replace github.com/agent-substrate/env=/path/to/env-rl`.
 
 ## Connect
 

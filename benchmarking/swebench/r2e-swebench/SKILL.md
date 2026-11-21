@@ -100,7 +100,7 @@ Install `ko` (`go install github.com/google/ko@latest`), `crane`
 clean working tree:
 
 ```bash
-export ENV_REPO=/path/to/sandboxenv-rl
+export ENV_REPO=/path/to/env-rl
 export PROJECT=YOUR_GCP_PROJECT
 export REGION=us-central1
 export DOCKERHUB_REMOTE="${REGION}-docker.pkg.dev/${PROJECT}/dockerhub-remote"

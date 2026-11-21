@@ -60,7 +60,7 @@ func (h *deleteHookControl) DeleteActorTemplate(ctx context.Context, req *ateapi
 // its in-use check and its delete are serialized by an in-process lock only.
 // The test is skipped until a cross-replica guard exists; it then must pass.
 func TestRecreateAcrossReplicasSparesActorCreatedAfterInUseCheck(t *testing.T) {
-	t.Skip("known limitation: AE-5 holds per replica; the in-use check and the delete are not serialized across replicas (https://github.com/ai-on-gke/sandboxenv-rl/issues/273)")
+	t.Skip("known limitation: AE-5 holds per replica; the in-use check and the delete are not serialized across replicas (https://github.com/gke-labs/env-rl/issues/26)")
 	cert := propCert(t)
 	control := fakecontrol.New()
 	hooks := &deleteHookControl{Server: control}

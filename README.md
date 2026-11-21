@@ -196,7 +196,7 @@ release is
 thus the steps below build the CLI and images from source:
 
 ```bash
-git clone https://github.com/gke-labs/env-rl && cd sandboxenv-rl
+git clone https://github.com/gke-labs/env-rl && cd env-rl
 go install github.com/google/ko@latest
 go install ./cmd/ate-env
 make images ATE_ENV_IMAGE_REPO=<registry>   # prints --guest-image and --api-image
