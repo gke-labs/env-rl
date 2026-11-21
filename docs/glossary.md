@@ -91,12 +91,14 @@ for control-plane terms.
   pull; distinct from the fleet's `preflight()`, which checks the connection to `ate-env-api`, and
   `preflight_report()`, which returns a `PreflightReport` over connectivity, each loaded image's
   derived template and golden snapshot (`GetImageStatus`), and placement domains
-  (`ListPlacementDomains`). `swebench-loader preflight`, `swebench-loader run -placement -preflight`
-  and `ate_env_rl.PreflightWarmer` run it from an `image-placement.json` plan and
-  `python -m ate_env_harbor.warm` over a Harbor dataset, each after a wait for the image's golden,
-  while `WarmImage` (`ate-env warm-image`) covers one image and domain with no golden wait, so call
-  it after `GetImageStatus` (`ate-env image-status`) reports `READY` when the run relies on the
-  golden.
+  (`ListPlacementDomains`). `swebench-loader preflight`,
+  `swebench-loader run -placement -preflight`, and `ate_env_rl.PreflightWarmer` (plus
+  `ate_env_openhands.agent_sandbox_rl.SandboxFleet` under `FleetConfig(preflight=True)`) run it from
+  an `image-placement.json` plan and `python -m ate_env_harbor.warm` over a Harbor dataset, waiting
+  for each image's golden by default (`-golden`, `-preflight-golden`, and
+  `ate_env_rl.FleetConfig.preflight_golden` also accept `skip` and `fail`), while `WarmImage`
+  (`ate-env warm-image`) covers one image and domain with no golden wait, so call it after
+  `GetImageStatus` (`ate-env image-status`) reports `READY` when the run relies on the golden.
 - **Probe** / **probe environment**: A short-lived environment a pre-flight creates with a domain's
   worker selector and holds until it runs, so the image's layers and golden snapshot are on its
   node; its node is read (`Environment.node`) and it is deleted. `WarmImage` names its probes

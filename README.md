@@ -105,12 +105,13 @@ Request-path zoom:
 | [`cmd/ate-env-api`](./cmd/ate-env-api) | The API service: environment lifecycle, guest calls, MCP and the port proxy. |
 | [`cmd/ate-env-guest`](./cmd/ate-env-guest), [`guest/`](./guest) | The daemon inside each environment (a PID 1 init with sidecar supervision) and its services: `guest/process` and `guest/filesystem`. |
 | [`cmd/ate-env-reporter`](./cmd/ate-env-reporter) | The fleet inventory reporter: on an interval it writes one cluster's snapshot (atespaces, templates, tags, workers, actors, WorkerPools and `ate-env-api` Deployments, the schema of `internal/inventory`) to a Cloud Storage bucket or a directory. It reads the control plane and the Kubernetes API and writes nothing to the cluster. |
+| [`cmd/ate-env-fleet-site`](./cmd/ate-env-fleet-site) | The fleet site: one read-only website on Cloud Run behind Identity-Aware Proxy over the clusters' snapshots, BigQuery actor events, Cloud Monitoring metrics, and trainer and benchmark runs. |
 | [`cmd/benchmarking`](./cmd/benchmarking) | The benchmark binaries: `swebench-loader` and the `bench` harness. |
 | [`clients/`](./clients/README.md) | The Go client (package `env`) and the Python client `ate_env_rl` with the fleet SDK. |
 | [`integrations/`](./integrations/README.md) | Framework integrations: E2B, Harbor, NeMo Gym, OpenHands, uni-agent. |
 | [`examples/`](./examples/README.md) | Runnable examples, from a Go MCP client to multi-node agentic GRPO recipes. Not supported. |
 | [`benchmarking/`](./benchmarking/README.md) | The SWE-bench loader scripts, the `bench` scenarios, the telemetry report tool and the benchmarking skills. |
-| [`internal/`](./internal) | The packages the binaries are built from: `apiservice` (the gRPC server), `ate` (the Substrate client), `inventory` (fleet inventory snapshot schema), `reporter` (the snapshot writer), `mcp`, `portproxy`, `routertls`, `hostcheck`, `sidecarenv`, `telemetry`, `tool`, `unknownfields`, `benchmarking/*`, and the test doubles and helpers in `internaltest` (`fakecontrol`, `fakerouter`, `synctestrapid`, `testcerts`). |
+| [`internal/`](./internal) | The packages the binaries are built from: `apiservice` (the gRPC server), `ate` (the Substrate client), `envstore` (the environment metadata store), `fleetsite` (the fleet site), `inventory` (fleet inventory snapshot schema), `reporter` (the snapshot writer), `mcp`, `portproxy`, `routertls`, `hostcheck`, `sidecarenv`, `telemetry`, `tool`, `unknownfields`, `benchmarking/*`, and the test doubles and helpers in `internaltest` (`fakecontrol`, `fakerouter`, `synctestrapid`, `testcerts`). |
 | [`proto/ateenv/v1alpha`](./proto/ateenv/v1alpha) | The `ateenv.v1alpha` API: `env.proto` (`EnvironmentService`) and `guest.proto` (`ProcessService`, `FileSystemService`), with the generated Go stubs. |
 | [`proto/testdata/client-parity`](./proto/testdata/client-parity) | Shared Go and Python client conformance vectors (errors, executable names, image refs, metric families, RPC attributes, RPC coverage, semconv, spans). |
 | [`docs/`](./docs) | [Architecture](./docs/architecture.md), [glossary](./docs/glossary.md), [observability](./docs/observability.md), the [metrics reference](./docs/metrics.md), [rootfs images and runtime layers](./docs/rootfs-images/README.md), the [threat model](./docs/security/threat-model.md), [support](./docs/support.md), [releases](./docs/release.md), the developer guides in [`docs/dev`](./docs/dev), the maintenance chores in [`docs/chores`](./docs/chores), and the plans in [`docs/plans`](./docs/plans). |
@@ -191,7 +192,7 @@ You need a cluster with Agent Substrate at or after
 bucket, `kubectl` with `kubectl-ate`, Go (`1.27` or later), [ko](https://ko.build), and Python
 `3.10` or later for the SDK. The latest
 release is
-[`v0.1.0`](https://github.com/gke-labs/env-rl/releases/tag/v0.1.0) (2026-11-07);
+[`v0.2.1`](https://github.com/gke-labs/env-rl/releases/tag/v0.2.1) (2026-11-23);
 [docs/release.md](./docs/release.md) lists what a release publishes. `main` has changed after it,
 thus the steps below build the CLI and images from source:
 
@@ -226,7 +227,7 @@ ate-env delete dev1
 ```
 
 Drive environments from Python with the fleet SDK (`pip install ./clients/python`, or
-`SETUPTOOLS_SCM_PRETEND_VERSION=0.1.0 pip install ./clients/python` in a shallow clone without git
+`SETUPTOOLS_SCM_PRETEND_VERSION=0.2.1 pip install ./clients/python` in a shallow clone without git
 tags). Leaving the `with` block deletes everything the fleet created:
 
 ```python
@@ -482,8 +483,10 @@ wait on the router unless `X-Env-Wake-Wait` asks the proxy to wait instead (see
 `ate-env-api` can export traces and serve Prometheus metrics; both are off by default:
 
 - `--enable-tracing` exports OpenTelemetry traces over OTLP/gRPC, configured by
-  `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_INSECURE`. The server continues the W3C
-  `traceparent` / `tracestate` that a caller sends and passes it on to ateapi and the guests as is.
+  `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_INSECURE`. The server stamps the
+  environment or template each call targets under `ate.*` (`ate.atespace`, `ate.actor.name`,
+  `ate.template.name`), continues the W3C `traceparent` / `tracestate` that a caller sends, and
+  passes it on to ateapi and the guests as is.
   `ate-env manifest --enable-tracing --otlp-endpoint <url> [--otlp-insecure]` sets these.
 - `--metrics-listen-addr` (for example `:9090`) serves the families in
   [docs/metrics.md](docs/metrics.md) at `/metrics` on a listener of its own.
@@ -695,8 +698,10 @@ ate-env manifest --enable-tracing --otlp-endpoint http://ate-env-collector.ate-e
 ### 5. Optional: the fleet site
 
 `ate-env-fleet-site` is one read-only website for every cluster, on Cloud Run behind
-Identity-Aware Proxy. It reads the reporters' snapshots from the bucket and the actor events from
-BigQuery; [the plan's quickstart](docs/plans/sandbox-fleet-site/quickstart.md) has the deployment.
+Identity-Aware Proxy. It reads the reporters' snapshots from the bucket, the actor events from
+BigQuery, the named PromQL series from Cloud Monitoring (`-metrics-project`), and trainer runs and
+benchmark bundles from Cloud Storage (`-bench-buckets`);
+[the plan's quickstart](docs/plans/sandbox-fleet-site/quickstart.md) has the deployment.
 To look at the snapshots of a reporter run with `--out-dir` on your machine:
 
 ```bash
@@ -922,7 +927,7 @@ Manages process execution, I/O streaming, and signals inside the environment con
 
 | RPC | Description |
 | --- | ----------- |
-| `StartProcess` | Launches a process (optionally with a stdin pipe, a PTY and a timeout) and returns the `Process` resource |
+| `StartProcess` | Launches a process (optionally with a stdin pipe, a PTY, a timeout and an idempotency `request_id`) and returns the `Process` resource |
 | `GetProcess` | Retrieves the process state, exit code, `timed_out` flag, and timestamps |
 | `StreamProcessOutput` | Streams stdout and stderr chunks; with `follow`, ends with an `exit` message carrying the final `Process` |
 | `WriteProcessInput` | Streams bytes to the process's stdin; a message with `close` sends EOF |
