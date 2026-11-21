@@ -1,6 +1,6 @@
 # sandboxenv-rl architecture
 
-Status: describes `main` at `637a24fb`. Re-check §Components when `internal/ate` or
+Status: describes `main` at `441aa2c9`. Re-check §Components when `internal/ate` or
 `internal/apiservice` changes. See [README.md](../README.md) and [docs/glossary.md](./glossary.md).
 
 ## Problem
@@ -47,12 +47,11 @@ flowchart LR
   GuestDaemon --> Workspace
 ```
 
-Clients interact with `ate-env-api`, which runs as a Kubernetes Deployment inside the cluster.
-`ate-env-api` translates environment lifecycle calls into Substrate control plane requests
-(`ateapi`), forwards guest process and filesystem calls across the Substrate router (`atenet`) via
-`guestSession`, serves MCP tools over pooled connections, and proxies arbitrary TCP ports via HTTP
-`CONNECT` tunnels. Inside each actor, `ate-env-guest` runs as PID 1 in gVisor, spawns supervised
-child processes, and serves `ProcessService` and `FileSystemService`.
+Clients interact with `ate-env-api` (a cluster Deployment), which translates lifecycle calls to
+Substrate (`ateapi`), forwards guest RPCs across `atenet` via `guestSession`, serves MCP tools over
+pooled connections, and proxies TCP ports via HTTP `CONNECT` tunnels. Inside each gVisor actor,
+`ate-env-guest` runs as PID 1, supervises child processes, and serves `ProcessService` and
+`FileSystemService`.
 
 ## Components
 
@@ -60,8 +59,9 @@ child processes, and serves `ProcessService` and `FileSystemService`.
 
 - **Owns**: gRPC API (`EnvironmentService`, `ProcessService`, `FileSystemService`), bearer auth,
   `ActorTemplate` derivation (`imagetemplate.go`), wake retries (`wakeretry.go`), router pooling
-  (`-router-pool-size`), `boundedAwakeCache` (`-reactive-wake`), `ListPlacementDomains`, and
-  `WarmImage` (`-warm-max-probes-per-node`, `placement.go`).
+  (`-router-pool-size`), `boundedAwakeCache` (`-reactive-wake`), server-span `ate.*` target
+  attributes (`span_identity.go`, `-enable-tracing`), `ListPlacementDomains`, and `WarmImage`
+  (`-warm-max-probes-per-node`, `placement.go`).
 - **Calls**: `internal/ate.Client` (`internal/envstore.Store` under `-environment-store=configmaps`)
   and `atenet` via `s.guestSession` (`routerConns` when pooled).
 - **Must not do**: Must not run local commands, buffer full files, or track processes in memory.
@@ -77,17 +77,14 @@ child processes, and serves `ProcessService` and `FileSystemService`.
 
 ### Guest daemon (`cmd/ate-env-guest`, `guest/process`, `guest/filesystem`)
 
-- **Owns**: In-actor execution, process tracking, PTY allocation, file streaming, and sidecar
-  supervision on TCP port `80` (plaintext HTTP/1.1 and h2c). Mounted into rootfs images at `/ate`
-  (`GuestMountPath`).
-- **PID 1 init**: When running as PID 1, `cmd/ate-env-guest/init_linux.go` sets
-  `PR_SET_CHILD_SUBREAPER` and re-execs itself. The outer process acts as an init reaper, collecting
-  orphaned zombie processes with non-blocking `wait4` calls.
+- **Owns**: In-actor execution, process tracking, PTY allocation, file streaming, and sidecars on
+  TCP port `80` (HTTP/1.1 and h2c), mounted read-only at `/ate` (`GuestMountPath`).
+- **PID 1 init**: As PID 1, `cmd/ate-env-guest/init_linux.go` sets `PR_SET_CHILD_SUBREAPER` and
+  re-execs so the outer init reaps orphaned zombies via non-blocking `wait4`.
 - **Process tracking**: `guest/process.Tracker` launches non-PTY commands with `Setpgid: true` (PTYs
-  with `Setsid: true`) and delivers signals to the process group via negative PID (`-pid`). Stdout
-  and stderr for non-PTY processes spool to `/var/log/ate-jobs` up to `DefaultMaxLogBytes` (10 MiB)
-  per stream; interactive PTY streams spool without a byte limit (`DefaultMaxLogBytes` does not
-  apply).
+  with `Setsid: true`) and signals the process group via negative PID (`-pid`). Non-PTY stdout and
+  stderr spool to `/var/log/ate-jobs` up to `DefaultMaxLogBytes` (10 MiB/stream), while interactive
+  PTY streams spool without a byte limit (`DefaultMaxLogBytes` does not apply).
 - **Filesystem**: `guest/filesystem` streams file reads in chunks up to `DefaultReadBufferSize` (64
   KiB). It confines paths to the configured `-workspace` flag root (`guest/filesystem.Service`); the
   default `"/"` disables confinement (`DefaultWorkspace = "/workspace"` and `WORKSPACE` apply only
@@ -114,29 +111,32 @@ child processes, and serves `ProcessService` and `FileSystemService`.
 - **`cmd/ate-env`**: CLI for lifecycle (`create`, `get`, `suspend`, `delete`), inspection and
   warming (`server-info`, `newServerInfoCommand`; `image-status`, `newImageStatusCommand`;
   `placement-domains`, `newPlacementDomainsCommand`; `warm-image`, `newWarmImageCommand`), `shell`,
-  `read`/`write`, and `ate-env manifest` (`--environment-metadata`, `--port-proxy-host-suffix`,
-  `--pod-monitoring`, `template --add-capability`, `reporter`, `collector`).
+  `read`/`write`, and `ate-env manifest` (`--domains`, `--node-selector`, `--environment-metadata`,
+  `--port-proxy-host-suffix`, `--pod-monitoring`, `template --add-capability`, `workerpool`,
+  `reporter`, `collector`).
 - **`cmd/ate-env-reporter`**: Daemon (`internal/reporter`) writing cluster fleet inventory snapshots
   (`internal/inventory`) on an interval to a bucket or directory, with optional tick spans
   (`-enable-tracing`) and tick durations (`-metrics-listen-addr`).
-- **`cmd/ate-env-fleet-site`**: Read-only web server (`internal/fleetsite`) for Cloud Run behind
-  Identity-Aware Proxy: the Fleet and Cluster pages and a JSON API over every cluster's snapshot,
-  and actor events from BigQuery. It holds no cluster credential.
+- **`cmd/ate-env-fleet-site`**: Read-only IAP Cloud Run server (`internal/fleetsite`, no cluster
+  credential) serving Fleet, Cluster, Actor (`/actors/{uid}`), Live (`/live`), and Runs (`/runs`,
+  trainer runs and `-bench-buckets`) pages plus `/api/v1/*` JSON and PromQL (`-metrics-project`)
+  APIs over bucket snapshots and BigQuery actor events (`-events-table`).
 - **`clients/go`**: Public Go SDK (`Client` with `List`, `ClientOptions` with `Connections`,
   `DialOptions`, and `MetricsRegisterer`, `Env`, `Process`, `StartError`).
 - **`clients/python`**: `ate-env-rl` (`ate_env_rl`): async `Client` (`credentials`,
   `list_environments`/`EnvironmentPage`), `Env`, `SandboxFleet` (`LoopRunner`), `AsyncSandboxFleet`
-  (`recycle`), `release_all`, `teardown(verify=True)` (`TeardownReport`), `preflight_report`
-  (`PreflightReport`), `FleetConfig` (`preflight=True`, `exit_hooks=True`), `PreflightWarmer`, and
-  `adapters` (`swebench`, `r2egym`).
+  (`recycle`), `wait_pools_ready` (`PoolReadiness`), `release_all`, `teardown(verify=True)`
+  (`TeardownReport`), `preflight_report` (`PreflightReport`), `FleetConfig` (`preflight=True`,
+  `exit_hooks=True`, `warm_create_budget`), `PreflightWarmer`, `adapters` (`swebench`, `r2egym`).
 - **`integrations/e2b`**: In-repo package `ate-env-e2b` (`ate_env_e2b`). Implements E2B's `Sandbox`
   and `AsyncSandbox` over the `envd` runtime layer and port proxy.
-- **`integrations/harbor`**: In-repo package `ate-env-harbor`. Implements `AteEnvEnvironment`, a
-  Harbor environment provider (0.25 and 0.26), and `ate_env_harbor.warm`.
+- **`integrations/harbor`**: In-repo package `ate-env-harbor`. Implements `AteEnvEnvironment`
+  (Harbor 0.25 and 0.26, wrapping commands in `bash -c` when present) and `ate_env_harbor.warm`.
 - **`integrations/nemo-gym`**: In-repo package `nemo-gym-substrate`. Implements NeMo Gym's
   `SubstrateSandboxProvider`.
 - **`integrations/openhands`**: In-repo package `ate-env-openhands`. Implements OpenHands'
-  `AteEnvWorkspace` and `FleetWorkspace` over the port proxy.
+  `AteEnvWorkspace`, `FleetWorkspace`, and `agent_sandbox_rl` (`FleetConfig(preflight=True)`) over
+  the port proxy.
 - **`integrations/uni-agent`**: In-repo package `uni-agent-substrate`. Implements uni-agent's
   `AteEnvSandbox` (`ate_env` provider) and `r2e_gym` task.
 
@@ -146,11 +146,12 @@ child processes, and serves `ProcessService` and `FileSystemService`.
   `spindown`, `measure`, `reap`, `report`, `validate`, `upload`, `compare`, `run`) backed by
   `internal/benchmarking/{job,measure,overlay,schema,sut,swebench}` and `benchmarking/scenarios/`.
 - **`cmd/benchmarking/swebench-loader`**: Runs trajectories in `eval`, `steps`, and `open-loop`
-  modes (`run`, with `-strategy`, `-placement`, `-domain-width`, `-task-order`, `-preflight`, and
-  `-wake-backoff` across wake and park-suspend retries), resolves schedules (`resolve`), renders
-  mixes (`render-plan`, `swebench.BuildRenderedPlan`), plans placement (`plan-placement`,
-  `swebench.PlanImagePlacement`), warms caches (`preflight`, `swebench.PreflightWarmer`), and
-  handles `trajectory-assets`, `convert-trace`, `report`, and `compare`.
+  modes (`run`, with `-strategy`, `-placement`, `-domain-width`, `-task-order`, `-preflight` and its
+  `-preflight-*` knobs, and `-wake-backoff` across wake and park-suspend retries), resolves
+  schedules (`resolve`), renders mixes (`render-plan`, `swebench.BuildRenderedPlan`), plans
+  placement (`plan-placement`, `swebench.PlanImagePlacement`), warms caches (`preflight` with
+  `-golden`, `swebench.PreflightWarmer`), and handles `trajectory-assets`, `convert-trace`,
+  `report`, and `compare`.
 - **`internal/benchmarking/swebench`**: Emits JSONL events (`EventRun`, `EventCreate`, `EventTTFI`,
   `EventTTFIC`, `EventWake`, `EventStep`, `EventTask`, `EventFork`, `EventSuspend`, `EventDelete`,
   `EventBarrier`, `EventPark`, `EventPrewarm`, `EventReap`, `EventThink`, `EventPhase`) and
@@ -265,13 +266,12 @@ Key non-obvious points:
 
 ### 3. Suspend and delete an environment
 
-- **Suspend**: `internal/ate.Client.Suspend` calls Substrate's control plane with
-  `SuspendOptions{Mode: DURABILITY_MODE_SYNCHRONOUS}`. This blocks until the memory and filesystem
-  checkpoint upload to object storage completes. `internal/ate.Client.SuspendLocal`
-  (`SuspendEnvironment` with `SUSPEND_MODE_LOCAL`) uses `DURABILITY_MODE_ASYNCHRONOUS`: it returns
-  once the checkpoint is on the worker's node, the upload goes on in the background, and the
-  environment reports `ENVIRONMENT_STATUS_PAUSED` until it lands. Either call leaves an environment
-  that is already suspended or paused as it is.
+- **Suspend**: `internal/ate.Client.Suspend` calls Substrate with
+  `SuspendOptions{Mode: DURABILITY_MODE_SYNCHRONOUS}`, blocking until the checkpoint upload to
+  object storage completes. `internal/ate.Client.SuspendLocal` (`SuspendEnvironment` with
+  `SUSPEND_MODE_LOCAL`) uses `DURABILITY_MODE_ASYNCHRONOUS`, returning once checkpointed on the
+  worker's node while uploading in the background (`ENVIRONMENT_STATUS_PAUSED` until landed). Either
+  call leaves an already suspended or paused environment unchanged.
 - **Delete**: `internal/ate.Client.Delete` calls `DeleteActor` (stopping any state, releasing
   workers/snapshots) and `evictGuest`, and `s.Store.Delete` removes any `envstore.Record`.
 
@@ -284,13 +284,12 @@ Key non-obvious points:
   `internal/envstore` keeps one `ConfigMap` per actor UID (`SweepOrphans`, `ActorUIDs`).
 - **Substrate control plane (`ateapi`) is the source of truth**: Stores actor records, templates,
   worker pool allocations, and state transitions in PostgreSQL.
-- **Snapshots**: Suspended actors persist memory pages and filesystem layers in object storage
-  (`gs://`). Template golden snapshots seed new actors. Per-actor snapshots store checkpoints during
-  multi-step runs.
-- **Inside the actor**: File modifications persist in `/workspace` across process executions. Spool
-  files live in `DefaultLogDir` (`/var/log/ate-jobs`) and are capped at `DefaultMaxLogBytes` (10 MB
-  per stream for non-PTY commands). `guest/process.Tracker` prunes finished process records after
-  `DefaultRetentionPeriod` (1 hour) or when history exceeds `DefaultMaxRetainedProcesses` (100).
+- **Snapshots**: Suspended actors persist memory and filesystem layers in `gs://`. Template golden
+  snapshots seed new actors, and per-actor snapshots store multi-step checkpoints.
+- **Inside the actor**: `/workspace` edits persist across processes. Non-PTY spools in
+  `DefaultLogDir` (`/var/log/ate-jobs`) cap at `DefaultMaxLogBytes` (10 MiB/stream), and
+  `guest/process.Tracker` prunes exited records after `DefaultRetentionPeriod` (1h) or past
+  `DefaultMaxRetainedProcesses` (100).
 
 ## Relationship to Substrate
 
@@ -302,41 +301,39 @@ Key non-obvious points:
 - **Added by `sandboxenv-rl`**: In-actor process lifecycle, PTY allocation, file streaming,
   on-demand rootfs image template derivation, wake budget retries, MCP server, HTTP/WebSocket port
   proxy, and Python RL rollout scheduling.
-- **Operational coupling**: The worker image (`ateworker-gvisor`) running on the cluster must be
-  built from the exact Substrate release commit matching the control plane. `ate-env-api` requires
+- **Operational coupling**: The cluster's `ateworker-gvisor` image must be built from the Substrate
+  release commit matching the control plane, and `ate-env-api` requires
   `spiffe://cluster.local/ns/ate-env/sa/ate-env-api` in `atenet`'s ingress allow-list.
 
 ## Security
 
 `sandboxenv-rl` defines four trust boundaries:
 
-1. **Client to `ate-env-api`**: `internal/hostcheck` protects local browser port-forwarding against
-   DNS rebinding across HTTP endpoints (`/healthz`, MCP, port proxy). When `-auth-token-file` is
-   configured, `BearerAuth` enforces constant-time bearer token validation on gRPC services and
-   authenticated HTTP routes (`GET /healthz` is exempt from auth).
-2. **`ate-env-api` to Substrate control plane**: Authenticated using optional Kubernetes
-   ServiceAccount projected bearer tokens (`-ateapi-token-file`).
+1. **Client to `ate-env-api`**: `internal/hostcheck` guards browser port-forwarding against DNS
+   rebinding on HTTP endpoints (`/healthz`, MCP, port proxy). With `-auth-token-file`, `BearerAuth`
+   enforces constant-time bearer token checks on gRPC and HTTP routes (`GET /healthz` exempt).
+2. **`ate-env-api` to Substrate control plane**: Authenticated via projected ServiceAccount bearer
+   tokens (`-ateapi-token-file`).
 3. **`ate-env-api` to actors**: Routed through `atenet` over mTLS using SPIFFE client certificates.
    Inside the actor, `guest/filesystem` confines file operations to the `-workspace` flag root;
    `cmd/ate-env-guest` defaults `-workspace` to `"/"` (no confinement) unless explicitly set.
 4. **Snapshot storage**: Governed by bucket IAM, encryption keys, and retention rules.
 
-See [docs/security/threat-model.md](./security/threat-model.md) for the threat analysis and accepted
-risks.
+See [docs/security/threat-model.md](./security/threat-model.md) for threats and accepted risks.
 
 ## Design decisions
 
 - **Thin proxy handlers in `internal/apiservice`**: `apiservice` forwards `ProcessService` and
-  `FileSystemService` streams directly to `ate-env-guest` over `atenet`. Keeping execution logic
-  inside the guest ensures identical behavior whether invoked via gRPC, CLI, MCP, or Python SDK.
+  `FileSystemService` streams directly to `ate-env-guest` over `atenet`, giving identical execution
+  behavior across gRPC, CLI, MCP, and the Python SDK.
 - **Router dial paths and wake gaps (Position A)**: Three paths dial `atenet`: (1)
   `apiservice.(*Server).guestSession` (`-router-pool-size`, `ensureAwake`/`boundedAwakeCache`, gRPC
   RPCs), (2) `internal/ate.Client.DialGuest` (actor-pooled for `internal/mcp` without `ensureAwake`,
   duplicating `guestSession` interceptors, a known gap), and (3) `internal/portproxy` (`CONNECT`
   wake loop and `X-Env-Wake-Wait` holds).
-- **Interceptors append `ate-target-actor` without forwarding caller metadata**: Forwarding incoming
-  headers caused duplicate `ate-target-actor: <atespace>/<id>` headers, which `atenet-router`
-  rejects with "invalid actor reference".
+- **Interceptors append `ate-target-actor` without forwarding caller metadata**: Forwarding caller
+  headers duplicated `ate-target-actor: <atespace>/<id>`, which `atenet-router` rejects with
+  "invalid actor reference".
 - **PID 1 child subreaper re-exec in `cmd/ate-env-guest`**: Re-execs so the outer PID 1 runs
   non-blocking `wait4` reaping for orphans without racing `os/exec.Cmd.Wait` in the process tracker.
 - **OCI image volume for guest injection (`/ate`)**: Derived templates mount `ate-env-guest`
