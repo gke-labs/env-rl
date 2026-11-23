@@ -1,12 +1,13 @@
 # Plan: labels and a time to live on an environment
 
 Status: proposal, 2026-11-13, checked against `main` at `456353fd` and Substrate at the pin
-(`274605f1`) and at its `main` (`cf5768a0`). Pull request 1, the store, is #407; the rest is not
-built. Decided on 2026-11-15: EM-E (the actor first) and EM-F (a read from the API server before
-each delete by deadline). Decided on 2026-11-16: EM-D (reads from the informer alone), EM-G (a list
-with a selector takes the ids from the informer), EM-H (one switch, and E2B's default lifetime with
-it) and EM-I (the sweep stops after 5 tries). Issues: #386 (time to live), #387 (labels; its first
-part, `ListEnvironments`, is a pull request of its own). The criteria are in
+(`274605f1`) and at its `main` (`cf5768a0`). Pull request 1, the store, is
+[0e73c34](https://github.com/gke-labs/env-rl/commit/0e73c34c718634076cd115c96dd0161641744ad3); the
+rest is not built. Decided on 2026-11-15: EM-E (the actor first) and EM-F (a read from the API
+server before each delete by deadline). Decided on 2026-11-16: EM-D (reads from the informer alone),
+EM-G (a list with a selector takes the ids from the informer), EM-H (one switch, and E2B's default
+lifetime with it) and EM-I (the sweep stops after 5 tries). Issues: #28 (time to live), #29 (labels;
+its first part, `ListEnvironments`, is a pull request of its own). The criteria are in
 [acceptance-criteria.md](./acceptance-criteria.md), group `EM`.
 
 ## 1. Goal
@@ -82,7 +83,8 @@ Substrate assigns the uid and the create time of an actor in `CreateActor` and i
 which the orphan rule must then not delete. That is why EM-E chose the other order: the actor first,
 then one write of the object with the `uid`. Its crash window leaves an actor without an object,
 thus an environment without the deadline that its caller asked for.
-`internal/ate.Client.CreateActor` returns the actor that `CreateActor` returns (since #392, which
+`internal/ate.Client.CreateActor` returns the actor that `CreateActor` returns (since
+[469f18a](https://github.com/gke-labs/env-rl/commit/469f18a0697c7e3818961bc84a1b1f33434fc05e), which
 reads its `create_time`); the pull request that adds the first create field keeps its uid.
 
 ### The sweep
@@ -219,13 +221,13 @@ when one does.
 
 ## 6. Pull requests
 
-| Pull request | Content                                                                                                               | After                 |
-| ------------ | --------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| this         | This plan and the `EM` criteria                                                                                       |                       |
-| 1 (#407)     | The store: the flag, the manifest switch with the Role, the informer, the object for an environment, the orphan sweep | this                  |
-| 2            | Labels: the create field, get, the list filter; Go and Python clients                                                 | 1, `ListEnvironments` |
-| 3            | The time to live: the create field, `SetEnvironmentTimeToLive`, the deadline sweep; Go and Python clients             | 1                     |
-| 4            | `ate_env_e2b`: `metadata`, `Sandbox.list`, `timeout`, `set_timeout` (E2B-31, E2B-32)                                  | 2, 3                  |
+| Pull request                                                                                      | Content                                                                                                               | After                 |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| this                                                                                              | This plan and the `EM` criteria                                                                                       |                       |
+| 1 ([0e73c34](https://github.com/gke-labs/env-rl/commit/0e73c34c718634076cd115c96dd0161641744ad3)) | The store: the flag, the manifest switch with the Role, the informer, the object for an environment, the orphan sweep | this                  |
+| 2                                                                                                 | Labels: the create field, get, the list filter; Go and Python clients                                                 | 1, `ListEnvironments` |
+| 3                                                                                                 | The time to live: the create field, `SetEnvironmentTimeToLive`, the deadline sweep; Go and Python clients             | 1                     |
+| 4                                                                                                 | `ate_env_e2b`: `metadata`, `Sandbox.list`, `timeout`, `set_timeout` (E2B-31, E2B-32)                                  | 2, 3                  |
 
 ## 7. Open points
 
@@ -233,7 +235,7 @@ when one does.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | EM-A | The object kind: ConfigMap, or a CRD of our own                                                                                                                                                                                                                                                                                                                                                             | ConfigMap: no cluster-scoped install, and the data is small                                                                                                       |
 | EM-B | The default of E2B's `timeout` in `ate_env_e2b` when the store is off                                                                                                                                                                                                                                                                                                                                       | Decided with EM-H, 2026-11-16: with the store off, today's warning; with it on, E2B's 300 s default                                                               |
-| EM-C | Whether the deadline moves when the environment is used (E2B does not move it; #76 asks for idle)                                                                                                                                                                                                                                                                                                           | No: a fixed deadline. Idle suspend stays #76                                                                                                                      |
+| EM-C | Whether the deadline moves when the environment is used (E2B does not move it; #6 asks for idle)                                                                                                                                                                                                                                                                                                            | No: a fixed deadline. Idle suspend stays #6                                                                                                                       |
 | EM-D | What a read on one replica gives right after a write on another: the informer's copy alone (then `EM-4` holds only after the watch delay), or a fallback for a miss on a young actor (a read from the API server's watch cache), with the uid of the object compared with the uid of the actor on each read                                                                                                 | Decided 2026-11-16: the informer's copy alone; the answer of a write holds what it wrote                                                                          |
 | EM-E | The order of the two writes of a create. Object first: a second write for the `uid`, and a rule for an object with no `uid` and a live actor. Actor first: one write, a rollback with `DeleteOptions.uid`, and a crash window that leaves a live environment with no deadline. With it: `expire_time` counted from the actor's create time (`EM-9` today) or from the clock of `ate-env-api` at the request | Decided 2026-11-15: the actor first, one write of the object with the uid, a rollback with `DeleteOptions.uid`; `expire_time` counts from the actor's create time |
 | EM-F | How the sweep is safe against a late informer after `SetEnvironmentTimeToLive`, and how many replicas read Substrate for orphans: each replica sweeps from its informer (the plan as it stands), a read of the object from the API server before each delete by deadline, or one sweeper behind a `coordination.k8s.io` `Lease` (one more Role rule)                                                        | Decided 2026-11-15: each replica sweeps from its informer, and reads the object from the API server before each delete by deadline; no `Lease`                    |
