@@ -87,14 +87,14 @@ _INT32_MAX = 2**31 - 1
 def _as_timedelta(value: float | timedelta) -> timedelta:
     """A duration argument, seconds or a timedelta, as a timedelta.
 
-    A timedelta holds whole microseconds. A positive number of seconds below
-    one microsecond would round to zero, which a time to live reads as "no
-    deadline": it is refused with ValueError.
+    A timedelta holds whole microseconds. A non-zero number of seconds below
+    one microsecond, positive or negative, would round to zero, which a time
+    to live reads as "no deadline": it is refused with ValueError.
     """
     if isinstance(value, timedelta):
         return value
     delta = timedelta(seconds=value)
-    if value > 0 and delta == timedelta(0):
+    if value != 0 and delta == timedelta(0):
         raise ValueError(f"a duration of {value!r} s is below one microsecond")
     return delta
 
@@ -329,8 +329,8 @@ class Client:
         environment store refuses a time to live (``FailedPreconditionError``)
         and creates nothing: check ``server_info()`` for the feature
         ``time_to_live`` first. A server that predates the field refuses it
-        with ``InvalidArgumentError``. A positive number of seconds below one
-        microsecond raises ``ValueError``.
+        with ``InvalidArgumentError``. A non-zero number of seconds below one
+        microsecond, positive or negative, raises ``ValueError``.
         """
         req = env_pb2.CreateEnvironmentRequest(
             id=id, atespace=atespace, rootfs_image=rootfs_image or ""
@@ -536,8 +536,8 @@ class Client:
         (``FailedPreconditionError``) and changes nothing: check
         ``server_info()`` for the feature ``time_to_live`` first. A server
         that predates the RPC answers ``RpcError`` with the code
-        ``UNIMPLEMENTED``. A positive number of seconds below one microsecond
-        raises ``ValueError``.
+        ``UNIMPLEMENTED``. A non-zero number of seconds below one microsecond,
+        positive or negative, raises ``ValueError``.
         """
         req = env_pb2.SetEnvironmentTimeToLiveRequest(id=id, atespace=atespace)
         req.time_to_live.FromTimedelta(_as_timedelta(time_to_live or 0))

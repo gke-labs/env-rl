@@ -107,15 +107,17 @@ async def test_time_to_live_is_refused_without_the_store(fake_stack):
     assert (await env.info()).expire_time is None
 
 
-async def test_seconds_below_one_microsecond_are_refused(fake_stack):
-    # A timedelta rounds 0.4 microseconds to zero, which would mean "no
-    # deadline": the client refuses the value before any RPC.
+@pytest.mark.parametrize("seconds", [4e-7, -4e-7])
+async def test_seconds_below_one_microsecond_are_refused(fake_stack, seconds):
+    # A timedelta rounds 0.4 microseconds, positive or negative, to zero,
+    # which would mean "no deadline": the client refuses the value before any
+    # RPC, thus a negative one does not remove a deadline silently.
     client, fakes = fake_stack
     fakes.environments.time_to_live = True
     with pytest.raises(ValueError):
-        await client.create("tiny", time_to_live=4e-7)
+        await client.create("tiny", time_to_live=seconds)
     assert ("ate-env", "tiny") not in fakes.environments.environments
     env = await client.create("timed", time_to_live=60)
     with pytest.raises(ValueError):
-        await env.set_time_to_live(4e-7)
+        await env.set_time_to_live(seconds)
     assert (await env.info()).expire_time is not None

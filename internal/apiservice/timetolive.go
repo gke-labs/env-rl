@@ -200,12 +200,13 @@ func (s *Server) SetEnvironmentTimeToLive(ctx context.Context, req *ateenvv1alph
 	if err != nil {
 		return nil, err
 	}
-	if s.Store == nil {
-		return nil, errStoreOff("SetEnvironmentTimeToLive")
-	}
 	atespace := req.GetAtespace()
 	if atespace == "" {
 		atespace = DefaultAtespace
+	}
+	setSpanEnvAttributes(ctx, atespace, req.GetId())
+	if s.Store == nil {
+		return nil, errStoreOff("SetEnvironmentTimeToLive")
 	}
 	var expire time.Time
 	if ttl > 0 {
@@ -217,6 +218,7 @@ func (s *Server) SetEnvironmentTimeToLive(ctx context.Context, req *ateenvv1alph
 		if err != nil {
 			return nil, toGRPCError(err)
 		}
+		setSpanActorAttributes(ctx, actor)
 		// The first try trusts the informer only for an object of this actor
 		// that the call then updates: the update names the copy it read, and
 		// the API server refuses it when the informer was behind. A decision

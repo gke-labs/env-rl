@@ -30,6 +30,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // spanTracer records the server spans of a traced telemetryEnv, with the
@@ -198,6 +200,40 @@ func TestServerSpansCarryEnvironmentIdentity(t *testing.T) {
 		return err
 	})
 	wantNames(t, "DeleteEnvironment", got, ref)
+}
+
+// FS-16: SetEnvironmentTimeToLive stamps the environment's identity before
+// the store check, thus also when the store is off, and the actor's full
+// identity once it reads the actor.
+func TestServerSpansCarrySetTimeToLiveIdentity(t *testing.T) {
+	st := newSpanTracer(t)
+	te := newTelemetryEnv(t, true)
+	ctx := context.Background()
+	if _, err := te.envClient.CreateEnvironment(ctx, &ateenvv1alpha.CreateEnvironmentRequest{Id: "ident"}); err != nil {
+		t.Fatal(err)
+	}
+	set := func(req *ateenvv1alpha.SetEnvironmentTimeToLiveRequest) map[string]attribute.Value {
+		return st.call(envService+"SetEnvironmentTimeToLive", func() error {
+			_, err := te.envClient.SetEnvironmentTimeToLive(ctx, req)
+			return err
+		})
+	}
+	ref := map[string]string{"ate.atespace": space, "ate.actor.name": "ident"}
+	wantNames(t, "SetEnvironmentTimeToLive (store off)", set(&ateenvv1alpha.SetEnvironmentTimeToLiveRequest{Id: "ident", TimeToLive: durationpb.New(time.Minute)}), ref)
+
+	te.srv.Store = runStore(t, fake.NewSimpleClientset())
+	got := set(&ateenvv1alpha.SetEnvironmentTimeToLiveRequest{Id: "ident", TimeToLive: durationpb.New(time.Minute)})
+	a, err := te.control.GetActor(ctx, &ateapipb.GetActorRequest{Actor: &ateapipb.ObjectRef{Atespace: space, Name: "ident"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantActor(t, "SetEnvironmentTimeToLive", got, map[string]string{
+		"ate.atespace": space, "ate.actor.name": "ident",
+		"ate.template.name": tmpl, "ate.template.atespace": space,
+	}, a)
+	wantNames(t, "SetEnvironmentTimeToLive (missing)",
+		set(&ateenvv1alpha.SetEnvironmentTimeToLiveRequest{Id: "missing", Atespace: "team-a", TimeToLive: durationpb.New(time.Minute)}),
+		map[string]string{"ate.atespace": "team-a", "ate.actor.name": "missing"})
 }
 
 // FS-16: each of the eight guest calls carries the environment its x-env-id
