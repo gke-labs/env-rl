@@ -1,6 +1,6 @@
 # Plan: per-environment egress policy
 
-Status: proposal against `main` at `a9b5c19` and Substrate `v1.0.0`. The criteria are in
+Status: proposal against `main` at `6183240c` and Substrate `v1.0.0`. The criteria are in
 [acceptance-criteria.md](./acceptance-criteria.md). No code exists yet.
 
 ## Goal
@@ -26,12 +26,21 @@ Paths below are relative to the module `go.ate.dev/substrate@v1.0.0`.
 - Each `EgressRule` is one of `http`, `https` or `tls_passthrough` (`ateapi.proto:650-672`). `https`
   is intercepted (MITM) and needs the actor to trust the gateway CA. `tls_passthrough` forwards TLS
   on the SNI without decryption (`:714-770`).
-- Each rule has `hostnames` (at most 256): a lowercase DNS name, `*.<name>` for one leftmost label,
-  or `*`. IP addresses, URLs and names with ports are invalid (`ateapi.proto:676-700`, test case
-  `IP literal pattern` at `egress_policy_test.go:604`). Two rules that tie on a name and port are
-  rejected (`ateapi.proto:609-619`).
-- `ports` is `all` or up to 16 numbers in 1..65535. It defaults to 80 for `http` and 443 for
-  `https`. `tls_passthrough` requires it (`ateapi.proto:700-791`).
+- Each rule has `hostnames`: 1 to 256 patterns, without repeats. A pattern is a lowercase DNS name
+  (RFC 1123, no trailing dot), `*.<name>` for one leftmost label, or `*`. Uppercase letters, a
+  trailing dot, IP addresses, URLs and names with ports are invalid (`ateapi.proto:676-700`; test
+  cases at `egress_policy_test.go:572-604`).
+- `ports` is a union: `all`, or 1 to 16 numbers in 1..65535 without repeats. A `ports` with neither
+  is invalid. It defaults to 80 for `http` and 443 for `https`. `tls_passthrough` requires it
+  (`ateapi.proto:756-791`).
+- A rule must set one of `http`, `https` or `tls_passthrough` (test case `no protocol` at
+  `egress_policy_test.go:497`).
+- Two rules that tie on a pattern and a port are rejected, whatever their protocols. Defaults are
+  applied first, so an `https` rule left on 443 ties with a `tls_passthrough` rule on 443 for the
+  same pattern (`cmd/ateapi/internal/apivalidation/egress_policy.go:92-127`).
+- The policy table references the actor with `ON DELETE CASCADE`
+  (`cmd/ateapi/internal/store/atepg/migrations/000001_initial.sql:34-43`): deleting an actor deletes
+  its policy.
 - `UpdateActorEgressPolicy` replaces the whole policy and requires `metadata.uid` and
   `metadata.version` as preconditions (`ateapi.proto:1917-1932`). A version or UID conflict is
   `Aborted`. A second create is `AlreadyExists`. A create under a missing actor is
@@ -63,6 +72,9 @@ policy, so each actor has none and Substrate denies all its egress. `docs/plans/
 
 ### API (`proto/ateenv/v1alpha/env.proto`)
 
+The messages follow Substrate's, one message per protocol, so a later field for one protocol (such
+as `effects` on `http` and `https`) is not a breaking change.
+
 ```proto
 message EgressPolicy {
   // Allows. Traffic that matches no rule is denied. Empty denies all egress.
@@ -70,16 +82,36 @@ message EgressPolicy {
 }
 message EgressRule {
   oneof protocol {
-    HostRule http = 1;
-    HostRule https = 2;
-    HostRule tls_passthrough = 3;
+    HttpRule http = 1;
+    HttpsRule https = 2;
+    TlsPassthroughRule tls_passthrough = 3;
   }
 }
-message HostRule {
+// Cleartext HTTP. ports defaults to 80.
+message HttpRule {
   repeated string hostnames = 1;
-  repeated int32 ports = 2;
-  bool all_ports = 3;
+  Ports ports = 2;
+  reserved 3; // effects
 }
+// HTTPS that the gateway intercepts. The task image must trust the gateway
+// CA. For HTTPS without interception, use tls_passthrough. ports defaults to
+// 443.
+message HttpsRule {
+  repeated string hostnames = 1;
+  Ports ports = 2;
+  reserved 3; // effects
+}
+// TLS forwarded on the SNI without decryption. ports is required.
+message TlsPassthroughRule {
+  repeated string hostnames = 1;
+  Ports ports = 2;
+}
+// Exactly one of all and numbers.
+message Ports {
+  AllPorts all = 1;
+  repeated int32 numbers = 2;
+}
+message AllPorts {}
 ```
 
 - `CreateEnvironmentRequest.egress_policy` (optional `EgressPolicy`).
@@ -90,18 +122,29 @@ message HostRule {
 
 ### Server
 
-- Validate rules locally with Substrate's limits. A bad rule is `InvalidArgument`, and no actor is
-  created.
-- `CreateEnvironment` with a policy calls `CreateActor`, then `CreateActorEgressPolicy`, then
+- Validate rules locally with each rule of Substrate listed in `EG-3`. Substrate's validator is in
+  `internal/` and cannot be imported, so the criterion lists the full set and a test holds each
+  case. A bad rule is `InvalidArgument`, and no actor is created.
+- `CreateEnvironment` with a policy calls `CreateActor`, then `CreateActorEgressPolicy`, then writes
+  the environment store's object when the request sets `time_to_live` (or labels, later), then
   responds. The actor stays suspended until its first wake, so the policy applies from first boot.
   Until the policy exists, the actor has none and Substrate denies its egress.
-- If the policy write fails, the server deletes the actor and returns the policy error. If the
-  delete fails too, it returns both errors.
+- When a write after `CreateActor` fails (the policy or the store's object), the server deletes the
+  actor as `EM-6` does: with the actor's uid as the precondition (`DeleteWithUID`), under
+  `context.WithoutCancel` with a bounded timeout. A caller that cancels cannot leak the actor, and a
+  slow rollback cannot delete a new actor with the same id. Substrate deletes the policy with the
+  actor. If the delete fails too, the server returns both errors.
 - `CreateEnvironment` without `egress_policy` makes no policy call.
 - `SetEnvironmentEgressPolicy` gets the actor (`NotFound` when missing), gets the policy, and calls
   `UpdateActorEgressPolicy` with its `uid` and `version`. On `NotFound` for the policy it calls
   `CreateActorEgressPolicy`. On `Aborted` or `AlreadyExists` it retries a bounded number of times,
-  then returns `Aborted`.
+  then returns `Aborted`. A `FailedPrecondition` from `CreateActorEgressPolicy` means the actor was
+  deleted after the get, and the server returns `NotFound`.
+- `GetEnvironmentEgressPolicy` returns `NotFound` for an environment with no policy, as Substrate
+  does. On a `NotFound` it gets the actor, so the error tells a missing environment from a missing
+  policy.
+- `WarmImage` probe actors get no policy. The node pulls the image before the actor starts, and the
+  probe only waits for the guest on port 80.
 - The `unknownfields` interceptor makes an older server refuse `egress_policy`, so a client never
   gets an environment with no policy when it asked for one.
 - `ate.Client` gains `CreateEgressPolicy`, `GetEgressPolicy` and `UpdateEgressPolicy`, and
@@ -114,19 +157,28 @@ message HostRule {
 - Mapping E2B `allow_internet_access`, `network` and `update_network`, and Harbor `network_mode`.
   These are follow-ups once this lands.
 
-## Open points
+## Decisions
 
-- **EG-A:** On a policy write failure, `CreateEnvironment` deletes the actor. The alternative leaves
-  the environment and returns an error naming it.
-- **EG-B:** `GetEnvironmentEgressPolicy` on an environment with no policy returns `NotFound`, or a
-  "no policy" marker distinct from deny-all. Both deny today, but they differ once a server-wide
-  default exists.
-- **EG-C:** `WarmImage` probe actors run with no policy. Do they need one (for example, to pull at
-  boot)?
-- **EG-D:** v1 exposes `https` (MITM) rules, or only `http` and `tls_passthrough`. `https` needs the
-  gateway CA in the task image.
-- **EG-E:** Environments restored from a derived template's golden snapshot get no policy from the
-  template. Confirm the per-environment policy is the only source.
+Decided in the review of #45 (2026-11-23):
+
+- **EG-A:** A failed write after `CreateActor` deletes the actor by uid under a bounded
+  `WithoutCancel` context, as `EM-6`.
+- **EG-B:** `GetEnvironmentEgressPolicy` with no policy returns `NotFound`, as Substrate does. A
+  distinct "no policy" marker can come with a server-wide default.
+- **EG-C:** `WarmImage` probe actors need no policy.
+- **EG-D:** v1 exposes `https`. The proto comment and the SDK docs point plain HTTPS callers to
+  `tls_passthrough` and say that `https` needs the gateway CA in the task image.
+- **EG-E:** Confirmed in Substrate `v1.0.0` (`docs/reference/api-guide.md:177-191`): an actor
+  restored from a golden snapshot does not inherit `golden_egress_policy`. The per-environment
+  policy is the only source.
+
+## Testing
+
+The Kind e2e rows (`EG-17`, `EG-18`) check DNS only: an allowed name resolves and a denied one gets
+`NXDOMAIN`. DNS is decided from the policy alone, while a connection through the egress gateway
+needs a reachable external host, which makes CI flaky. `EG-19` checks allowed and denied connections
+on a GKE cluster with Substrate's egress gateway, and the pull request that meets it records the
+run.
 
 ## Pull requests
 
@@ -138,4 +190,4 @@ One change per pull request, in this order:
 4. Go SDK.
 5. Python SDK.
 6. Threat model: close known gap 8.
-7. Live e2e test.
+7. Kind e2e test (DNS), and the live GKE check (connections).
