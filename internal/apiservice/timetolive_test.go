@@ -1081,7 +1081,10 @@ func TestDeadlineSweepThatRunsOutOfTime(t *testing.T) {
 	if err == nil || n == envs {
 		t.Fatalf("SweepDeadlines with a context that ended = %d, %v, want an error and environments left", n, err)
 	}
-	if left := te.control.ActorCount(); left != envs-n {
+	// A delete that was on the wire when the context ended can land without
+	// an answer: the sweep does not count it, and its actor is gone.
+	left := te.control.ActorCount()
+	if left > envs-n {
 		t.Errorf("%d actors stay after %d deletes of %d", left, n, envs)
 	}
 	for i := range envs {
@@ -1089,8 +1092,9 @@ func TestDeadlineSweepThatRunsOutOfTime(t *testing.T) {
 			t.Errorf("env-%d counts %s failures after a sweep that ran out of time", i, cm.Data["delete_failures"])
 		}
 	}
-	// The next sweep deletes the rest.
-	if m, err := te.srv.SweepDeadlines(t.Context(), last); m != envs-n || err != nil || te.control.ActorCount() != 0 {
-		t.Errorf("the next sweep = %d, %v, with %d actors left; want the other %d deleted", m, err, te.control.ActorCount(), envs-n)
+	// The next sweep deletes the rest. An environment whose delete landed
+	// without an answer is NotFound now, which is not a delete of this sweep.
+	if m, err := te.srv.SweepDeadlines(t.Context(), last); m != left || err != nil || te.control.ActorCount() != 0 {
+		t.Errorf("the next sweep = %d, %v, with %d actors left; want the other %d deleted", m, err, te.control.ActorCount(), left)
 	}
 }
