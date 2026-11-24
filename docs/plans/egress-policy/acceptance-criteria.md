@@ -8,7 +8,8 @@ Status: describes `main` at `6183240c` and Substrate `v1.0.0`. All rows are open
 A caller sets an environment's egress policy on `CreateEnvironment` and replaces or reads it with
 `SetEnvironmentEgressPolicy` and `GetEnvironmentEgressPolicy`. `ate-env-api` stores it as the
 actor's Substrate `EgressPolicy`. Unit tests run against `internal/internaltest/fakecontrol`. The
-e2e rows run in the Kind E2E job (`hack/ci/e2e.py`).
+Kind e2e rows (`EG-17`, `EG-18`) run in the Kind E2E job (`hack/ci/e2e.py`). `EG-19` is a manual run
+on a GKE cluster with Substrate's egress gateway, recorded in the pull request that meets it.
 
 Status values: **open** (planned, no pull request), **PR** (an open pull request meets it), **met**
 (on `main`, with the tests named).
