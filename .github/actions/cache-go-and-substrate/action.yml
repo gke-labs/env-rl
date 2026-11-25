@@ -65,7 +65,10 @@
 #   in this order:
 #
 #   1. one with the same go.mod and go.sum (only flake.lock changed), which
-#      still saves the module downloads;
+#      still saves the module downloads and the Substrate checkout. The step
+#      after restore discards ~/.cache/go-build when the matched key came from
+#      another flake.lock, because cgo test and tool binaries in the build cache
+#      record the old Nix store's glibc dynamic linker path;
 #   2. any cache of the scope. This is the case of a pull request that changes
 #      go.mod or go.sum: GitHub lets it read the caches of its base branch, so
 #      it gets main's. The Go caches are addressed by content, so the
@@ -124,10 +127,12 @@ runs:
         prefix="go-${SCOPE}-${RUNNER_OS_NAME}-"
         {
           echo "key=${prefix}${gosum}-${lock}"
+          echo "lock=${lock}"
           echo "restore-same-gosum=${prefix}${gosum}-"
           echo "restore-same-scope=${prefix}"
         } >>"${GITHUB_OUTPUT}"
     - name: Restore the Go caches
+      id: restore
       if: inputs.mode == 'restore'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -139,6 +144,17 @@ runs:
         restore-keys: |
           ${{ steps.key.outputs.restore-same-gosum }}
           ${{ steps.key.outputs.restore-same-scope }}
+    - name: Discard Go build cache on flake.lock change
+      if: inputs.mode == 'restore' && steps.restore.outputs.cache-hit != 'true' && steps.restore.outputs.cache-matched-key != ''
+      shell: bash
+      env:
+        MATCHED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
+        LOCK: ${{ steps.key.outputs.lock }}
+      run: |
+        if [[ "${MATCHED_KEY}" != *"-${LOCK}" ]]; then
+          echo "Restored ${MATCHED_KEY} under flake.lock ${LOCK}: discarding ~/.cache/go-build (cgo binaries carry the old Nix glibc path) while keeping ~/go/pkg/mod and ~/.cache/sandboxenv-rl."
+          rm -rf "${HOME}/.cache/go-build"
+        fi
     - name: Check whether this key is already saved
       id: exists
       if: >-
