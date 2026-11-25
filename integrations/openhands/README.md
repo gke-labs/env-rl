@@ -110,11 +110,14 @@ arguments go to `uv pip compile`: `./lock.sh --upgrade-package <name>` moves one
 
 This needs ate-env installed as in the [root README](../../README.md#get-started): Substrate at or
 after the version that README names, and ate-env-api's SPIFFE ID (`spiffe://cluster.local/ns/<namespace>/sa/ate-env-api`, namespace
-`ate-env` by default) in the router's ingress allow-list. The template below uses the default limits of
-`ate-env manifest template` (2 CPUs, 4 GiB); pass `--cpu` and `--memory` to change them.
+`ate-env` by default) in the router's ingress allow-list. The template below sets `--cpu 2` and
+`--memory 4Gi` for the agent-server sidecar (`ate-env manifest template` defaults to 1 CPU and
+2 GiB).
 
 ```bash
 ate-env manifest template --template oh-agent-server \
+  --cpu            2 \
+  --memory         4Gi \
   --rootfs-image   docker.io/library/debian@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8 \
   --guest-image    <registry>/ate-env-guest@sha256:<digest> \
   --layer          oh=<registry>/oh-agent-server-layer@sha256:<digest>=/opt/oh \

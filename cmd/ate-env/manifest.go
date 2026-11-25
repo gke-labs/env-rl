@@ -131,12 +131,14 @@ func checkWorkerPoolName(pool string) error {
 const sandboxConfigName = "gvisor-default"
 
 // Default compute limits for each actor. Substrate requires both on every
-// ActorTemplate since substrate#2285: the scheduler books them against worker
-// capacity. Two CPUs and 4 GiB match the Python client's ResourceLimits
-// default; size them for the workload with --cpu and --memory.
+// ActorTemplate since substrate#2285 and books them against worker capacity.
+// One CPU and 2 GiB double worker scheduling density over 2 CPUs / 4 GiB and
+// bound noisy-neighbor CPU bursts under gVisor. Pass --cpu and --memory to
+// tune for the workload (for example 500m / 1Gi or 250m / 512Mi for tool-wait
+// RL, or 2 / 4Gi for heavier sidecars).
 const (
-	defaultActorCPU    = "2"
-	defaultActorMemory = "4Gi"
+	defaultActorCPU    = "1"
+	defaultActorMemory = "2Gi"
 )
 
 // Wakeup-probe timeouts. Substrate fails an actor start or resume whose
@@ -959,8 +961,8 @@ It prints YAML to stdout without touching the cluster.`,
 	cmd.Flags().StringArrayVar(&tCfg.layers, "layer", nil, "extra runtime mounted as a read-only image volume, as name=image@sha256:...=/mount/path (repeatable)")
 	cmd.Flags().StringArrayVar(&tCfg.sidecars, "sidecar", nil, "command the guest starts and keeps running next to itself, an absolute binary path plus arguments, e.g. '/opt/opensandbox/execd --port 44772' (repeatable)")
 	cmd.Flags().StringArrayVar(&tCfg.sidecarReadyz, "sidecar-readyz", nil, "URL the actor's readiness waits for, e.g. http://127.0.0.1:44772/ready (repeatable)")
-	cmd.Flags().StringVar(&tCfg.cpu, "cpu", defaultActorCPU, "CPU limit of each actor, a Kubernetes quantity such as 2 or 500m, at least 1m, rendered as whole millicores (rounded up); Substrate requires one")
-	cmd.Flags().StringVar(&tCfg.memory, "memory", defaultActorMemory, "memory limit of each actor, a Kubernetes quantity such as 4Gi, at least 1Mi, rendered as whole bytes (rounded up); Substrate requires one")
+	cmd.Flags().StringVar(&tCfg.cpu, "cpu", defaultActorCPU, "CPU limit of each actor, a Kubernetes quantity such as 1, 500m or 2, at least 1m, rendered as whole millicores (rounded up). Substrate requires one and books it against worker capacity")
+	cmd.Flags().StringVar(&tCfg.memory, "memory", defaultActorMemory, "memory limit of each actor, a Kubernetes quantity such as 2Gi, 1Gi or 4Gi, at least 1Mi, rendered as whole bytes (rounded up). Substrate requires one and books it against worker capacity")
 	cmd.Flags().DurationVar(&tCfg.wakeupTimeout, "wakeup-timeout", 0, fmt.Sprintf("how long Substrate polls the guest's /readyz at each actor start and resume before it fails the actor, whole seconds from 1s to %s; 0 or unset means the default: %s with --sidecar-readyz, else Substrate's %s", maxWakeupTimeout, sidecarWakeupTimeout, substrateWakeupTimeout))
 	cmd.Flags().StringArrayVar(&tCfg.env, "env", nil, "environment variable for the actor's container as NAME=VALUE (repeatable); the guest passes it to sidecars and to each command it starts, e.g. a layer daemon's log level; use --sidecar-env for a secret")
 	cmd.Flags().StringArrayVar(&tCfg.sidecarEnv, "sidecar-env", nil, fmt.Sprintf("environment variable that only the --sidecar processes get, as NAME=VALUE (repeatable), e.g. a layer daemon's API key; the container carries it as %sNAME and the guest strips it before it starts anything. Limits: docs/security/threat-model.md", sidecarenv.Prefix))

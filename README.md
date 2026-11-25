@@ -531,9 +531,12 @@ base). A Substrate since
 [`d86746d8`](https://github.com/agent-substrate/substrate/commit/d86746d8) rejects the field
 otherwise.
 
-Each actor gets 2 CPUs and 4 GiB unless you pass `--cpu` and `--memory` (Kubernetes quantities such as
-`500m` or `8Gi`; CPU at most `999.999`, as Substrate requires). Substrate requires both limits and books them against worker capacity; templates
-derived per rootfs image inherit them.
+Each actor gets 1 CPU and 2 GiB unless you pass `--cpu` and `--memory` (Kubernetes quantities such
+as `500m` or `8Gi`, with CPU at most `999.999` as Substrate requires). Substrate requires both
+limits and books them against worker capacity, and templates derived per rootfs image inherit them.
+For high-density RL rollouts that spend most of each step waiting on policy inference, pass smaller
+limits such as `--cpu 500m --memory 1Gi` or `--cpu 250m --memory 512Mi`. Pass `--cpu 2 --memory 4Gi`
+(or higher) for multi-core test suites or heavier runtime sidecars.
 
 That template's container is the guest image itself. To run another image unmodified, name
 it with `--rootfs-image`: the guest is then mounted into it as a read-only OCI image volume (`guest`)

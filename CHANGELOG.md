@@ -7,6 +7,13 @@ user needs to know across them.
 ## Unreleased
 
 ### Changed
+- `ate-env manifest template` now defaults `--cpu` to `1` and `--memory` to
+  `2Gi` (previously `2` and `4Gi`). Substrate books both limits directly
+  against worker capacity, so 1 CPU and 2 GiB double default worker slot
+  density and cap noisy-neighbor CPU bursts while keeping room for typical
+  sandbox commands. Pass `--cpu 2 --memory 4Gi` explicitly for workloads or
+  sidecars that need the previous limits, or `--cpu 500m --memory 1Gi` for
+  higher-density RL rollouts.
 - `swebench-loader preflight` refuses `-probes-per-node`, `-max-rounds` or
   `-image-concurrency` below 1, and a `-probe-timeout`, `-golden-timeout` or
   `-golden-poll` that is not positive. Until now it ran such a pass with the
