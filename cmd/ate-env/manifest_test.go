@@ -235,8 +235,8 @@ func TestBuildActorTemplate(t *testing.T) {
 	}
 	// Substrate rejects an ActorTemplate without both limits (substrate#2285);
 	// since v0.6.0 they are integers: millicores and bytes.
-	if cpu, mem := limits(template); cpu != 2000 || mem != 4<<30 {
-		t.Errorf("resources.limits = %d millicores, %d bytes; want 2000 and %d (the %s / %s defaults)", cpu, mem, 4<<30, defaultActorCPU, defaultActorMemory)
+	if cpu, mem := limits(template); cpu != 1000 || mem != 2<<30 {
+		t.Errorf("resources.limits = %d millicores, %d bytes; want 1000 and %d (the %s / %s defaults)", cpu, mem, 2<<30, defaultActorCPU, defaultActorMemory)
 	}
 }
 
