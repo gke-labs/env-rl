@@ -68,7 +68,9 @@
 #      still saves the module downloads and the Substrate checkout. The step
 #      after restore discards ~/.cache/go-build when the matched key came from
 #      another flake.lock, because cgo test and tool binaries in the build cache
-#      record the old Nix store's glibc dynamic linker path;
+#      record the old Nix store's glibc dynamic linker path. The devShell's
+#      CGO_LDFLAGS (nix/ci.nix) already keeps Go from reusing them; the discard
+#      also covers caches saved before that change;
 #   2. any cache of the scope. This is the case of a pull request that changes
 #      go.mod or go.sum: GitHub lets it read the caches of its base branch, so
 #      it gets main's. The Go caches are addressed by content, so the
@@ -78,7 +80,8 @@
 #      same: 6m42 with main's cache against 15m24 without one (2026-11-12).
 #      Without this fallback a pull request that added dependencies ran the
 #      whole job cold, passed its tests after 30 minutes, hit the job's limit
-#      and so saved no cache for its next run either.
+#      and so saved no cache for its next run either. When main's cache was
+#      saved under another flake.lock, the same discard applies.
 #
 #   The job then saves under its own exact key, so the fallback costs one
 #   upload per go.sum change, as before. Go trims build cache entries it has
@@ -152,7 +155,7 @@ runs:
         LOCK: ${{ steps.key.outputs.lock }}
       run: |
         if [[ "${MATCHED_KEY}" != *"-${LOCK}" ]]; then
-          echo "Restored ${MATCHED_KEY} under flake.lock ${LOCK}: discarding ~/.cache/go-build (cgo binaries carry the old Nix glibc path) while keeping ~/go/pkg/mod and ~/.cache/sandboxenv-rl."
+          echo "::notice::Restored ${MATCHED_KEY} under flake.lock ${LOCK}: discarding ~/.cache/go-build (cgo binaries carry the old Nix glibc path) while keeping ~/go/pkg/mod and ~/.cache/sandboxenv-rl."
           rm -rf "${HOME}/.cache/go-build"
         fi
     - name: Check whether this key is already saved
