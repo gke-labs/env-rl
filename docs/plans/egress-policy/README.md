@@ -153,7 +153,8 @@ message AllPorts {}
 ## Out of scope
 
 - Credential-injection effects (`HttpRuleEffects`).
-- A server-wide default policy for environments created without one.
+- A server-wide default policy for environments created without one. It has its own plan,
+  [default-policy.md](./default-policy.md).
 - Mapping E2B `allow_internet_access`, `network` and `update_network`, and Harbor `network_mode`.
   These are follow-ups once this lands.
 
