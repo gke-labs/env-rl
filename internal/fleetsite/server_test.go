@@ -512,7 +512,7 @@ func TestSiteLogsQuotedPathsOnErrors(t *testing.T) {
 }
 
 // The node filter selects the actors on one node; the page shows at most
-// maxActorRows of them.
+// maxRows of them (FS-18).
 func TestClusterPageNodeFilterAndRowLimit(t *testing.T) {
 	ts := newTestSite(t)
 	snap := golden(t, "proj-a", "c-1", t0)
@@ -524,17 +524,17 @@ func TestClusterPageNodeFilterAndRowLimit(t *testing.T) {
 	big := golden(t, "proj-a", "c-2", t0)
 	base := big.Actors[0]
 	big.Actors = nil
-	for i := range maxActorRows + 5 {
+	for i := range maxRows + 5 {
 		a := base
 		a.UID, a.Name = fmt.Sprintf("u-%05d", i), fmt.Sprintf("env-%05d", i)
 		big.Actors = append(big.Actors, a)
 	}
 	big.Counts = inventory.ComputeCounts(big.Actors)
 	_, body = ts.getAfterWrite(t, big, "/clusters/proj-a/c-2")
-	if got := strings.Count(body, `href="/actors/u-`); got != maxActorRows {
-		t.Errorf("%d actor rows, want %d", got, maxActorRows)
+	if got := strings.Count(body, `href="/actors/u-`); got != maxRows {
+		t.Errorf("%d actor rows, want %d", got, maxRows)
 	}
-	if !strings.Contains(body, fmt.Sprintf("%d match; the first %d are shown", maxActorRows+5, maxActorRows)) {
+	if !strings.Contains(body, fmt.Sprintf("%d in the snapshot; the first %d are shown", maxRows+5, maxRows)) {
 		t.Error("the page does not say it shows the first rows only")
 	}
 }

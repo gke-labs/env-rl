@@ -416,6 +416,21 @@ audit: #62 (`7c04afa`) is pull request 5c, and it changes `internal/fleetsite`, 
 7. `FS-` is used by this plan only. #62 added FS-19; pull request 4b adds FS-17, and FS-18 is pull
    request 4c's (#60).
 
+## Audit of main, 2026-11-26, for pull request 4c
+
+Checked against `gke-labs/env-rl` at `9181b67`, for pull request 4c. Since `7c04afa`, the last
+audit: #59 (`9181b67`) is pull request 4b, and it changes `internal/fleetsite`, this plan and
+`CHANGELOG.md` only. The seven steps:
+
+1. `env.proto` is unchanged: eleven RPCs.
+2. `go.mod` and `go.sum` are unchanged, so Substrate is still `v1.0.0`.
+3. `internal/inventory` is unchanged; `go test ./internal/inventory/` passes, and the example of
+   `interfaces.md` parses equal to `snapshot.golden.json`.
+4. `docs/metrics.md` is unchanged.
+5. `cmd/ate-env` is unchanged, so `ate-env manifest` keeps every flag and subcommand of step 5.
+6. `cmd/benchmarking/bench/bundle.go` and `internal/benchmarking/schema` are unchanged.
+7. `FS-` is used by this plan only. #59 added FS-17 and #62 FS-19; pull request 4c adds FS-18.
+
 ## Sources
 
 - Substrate: `docs/observability.md`, `internal/actorevent/actorevent.go`,

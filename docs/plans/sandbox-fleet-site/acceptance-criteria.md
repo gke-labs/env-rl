@@ -1,6 +1,6 @@
 # Acceptance criteria: sandbox fleet site
 
-Status: accepted (#223); last checked 2026-11-26 against `7c04afa`. Each criterion has a command and
+Status: accepted (#223); last checked 2026-11-26 against `9181b67`. Each criterion has a command and
 an expected result. Evidence goes into `evidence/` in this directory, one file per acceptance pass,
 with the commit of each component.
 
@@ -23,6 +23,7 @@ with the commit of each component.
 | FS-15 | Reporter tick telemetry                  | 3, 4  |
 | FS-16 | Target identity on ate-env-api spans     | 9     |
 | FS-17 | Fleet page at scale                      | 5     |
+| FS-18 | Cluster page at scale                    | 4     |
 | FS-19 | Run trace is readable                    | 6     |
 
 ## FS-1: Inventory freshness
@@ -233,6 +234,28 @@ Added by pull request 4b.
   row shows right under the table's header.
 - Pass rule: the named tests pass in the Go CI job, and in the browser the deployments table is no
   taller than its rows.
+
+## FS-18: Cluster page at scale
+
+Added by pull request 4c.
+
+- Command: `go test -race -run '^TestClusterPage' ./internal/fleetsite`, which runs
+  `TestClusterPage`, `TestClusterPageBoundsEveryList`, `TestClusterPageFilters`,
+  `TestClusterPageBoundsTemplateSummary`, `TestClusterPageMenuBound`,
+  `TestClusterPageEscapesFilterValues` and `TestClusterPageNodeFilterAndRowLimit`; then open
+  `/clusters/<p>/<c>` for the largest cluster in headless Chrome.
+- Expected: each list of the Cluster page (deployments, WorkerPools, workers, actors, templates,
+  atespaces and tags) shows at most 200 rows and says how many the snapshot has, how many match its
+  filter, and that only the first 200 are shown. Templates are summarized by base template, a
+  derived template under its `base` and a base template under itself, in every atespace, with counts
+  by golden state; the 200 base templates with the most templates are listed, and each links to the
+  template list filtered by `base` and `golden`. `?pool=<namespace>/<name>` filters the workers, and
+  each WorkerPool links to its workers. Each form and link keeps the filters of the other sections.
+  A filter with more than 200 values is a text box instead of a menu. Snapshot text and query values
+  are escaped in links and hidden fields. For a snapshot with thousands of templates, tags and
+  workers, the page is under 1 MiB, and `GET /api/v1/clusters/<p>/<c>` still returns every row.
+- Pass rule: the named tests pass in the Go CI job, and the page of the largest cluster loads in
+  headless Chrome in under 1 s.
 
 ## FS-19: Run trace is readable
 
