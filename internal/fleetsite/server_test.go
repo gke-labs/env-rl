@@ -185,6 +185,122 @@ func TestFleetPage(t *testing.T) {
 	}
 }
 
+// FS-17: a cluster with more WorkerPools than the Fleet page lists shows
+// their totals, its short pools first, at most maxFleetPools rows, and a
+// link to the Cluster page for the rest.
+func TestFleetPageSummarizesWorkerPools(t *testing.T) {
+	ts := newTestSite(t)
+	snap := golden(t, "proj-a", "big", t0)
+	snap.WorkerPools = nil
+	for i := range 25 {
+		snap.WorkerPools = append(snap.WorkerPools, inventory.WorkerPool{Namespace: "ns", Name: fmt.Sprintf("pool-%02d", i), Replicas: 4, ReadyReplicas: 4, SandboxClass: "gvisor"})
+	}
+	// Short pools at the end of the snapshot's order, so a page that kept
+	// the first rows would cut them. pool-23 misses more workers than pool-21.
+	snap.WorkerPools[21].ReadyReplicas = 3
+	snap.WorkerPools[23].ReadyReplicas = 1
+	writeSnapshot(t, ts.dir, snap)
+	_, body := ts.get(t, "/")
+	for _, want := range []string{
+		"WorkerPools: 25, 96 / 100 workers ready",
+		`<span class="warn">2 short</span>`,
+		`<a href="/clusters/proj-a/big">15 more on the cluster page</a>`,
+		`<td class="warn">1 / 4</td>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Fleet page lacks %q", want)
+		}
+	}
+	if got := strings.Count(body, "<td>ns/pool-"); got != maxFleetPools {
+		t.Errorf("Fleet page lists %d pools, want %d", got, maxFleetPools)
+	}
+	// Short pools first, most missing first, then the snapshot's order.
+	order := []string{"ns/pool-23", "ns/pool-21", "ns/pool-00", "ns/pool-07"}
+	last := -1
+	for _, name := range order {
+		i := strings.Index(body, "<td>"+name+"</td>")
+		if i <= last {
+			t.Fatalf("%s is at %d, after the row before it at %d", name, i, last)
+		}
+		last = i
+	}
+	if strings.Contains(body, "<td>ns/pool-08</td>") {
+		t.Error("Fleet page lists a ready pool past the row limit")
+	}
+
+	// A cluster within the limit lists every pool and no link.
+	snap.WorkerPools = snap.WorkerPools[:maxFleetPools]
+	writeSnapshot(t, ts.dir, snap)
+	_, body = ts.get(t, "/?nocache=1")
+	if strings.Contains(body, "more on the cluster page") || strings.Count(body, "<td>ns/pool-") != maxFleetPools {
+		t.Error("a cluster within the row limit is not listed whole")
+	}
+	if !strings.Contains(body, "WorkerPools: 10, 40 / 40 workers ready</caption>") {
+		t.Error("a cluster with no short pool shows a short count")
+	}
+
+	// A cluster without pools shows no totals.
+	snap.WorkerPools = []inventory.WorkerPool{}
+	writeSnapshot(t, ts.dir, snap)
+	_, body = ts.get(t, "/?nocache=1")
+	if !strings.Contains(body, "<caption>WorkerPools</caption>") || strings.Contains(body, "0 / 0 workers ready") {
+		t.Error("a cluster without pools shows WorkerPool totals")
+	}
+}
+
+// FS-17: the tables side by side on a page keep their own height. A flex
+// item stretches to the tallest one by default, and a stretched table
+// spreads the extra height over its rows.
+func TestSiteColumnsDoNotStretch(t *testing.T) {
+	ts := newTestSite(t)
+	_, body := ts.get(t, "/static/site.css")
+	_, rule, _ := strings.Cut(body, "\n.cols {")
+	rule, _, _ = strings.Cut(rule, "}")
+	if !strings.Contains(rule, "align-items: flex-start;") {
+		t.Errorf(".cols {%s} does not set align-items: flex-start", rule)
+	}
+}
+
+// FS-17: the WorkerPool summary at the row limit and past it, without
+// pools, and with a pool that has more ready workers than desired.
+func TestSummarizePoolsBounds(t *testing.T) {
+	pools := func(n int) []inventory.WorkerPool {
+		var out []inventory.WorkerPool
+		for i := range n {
+			out = append(out, inventory.WorkerPool{Name: fmt.Sprintf("p%d", i), Replicas: 2, ReadyReplicas: 2})
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name               string
+		in                 []inventory.WorkerPool
+		count, rows, more  int
+		short, ready, want int
+	}{
+		{"none", nil, 0, 0, 0, 0, 0, 0},
+		{"at the limit", pools(maxFleetPools), maxFleetPools, maxFleetPools, 0, 0, 2 * maxFleetPools, 2 * maxFleetPools},
+		{"one past", pools(maxFleetPools + 1), maxFleetPools + 1, maxFleetPools, 1, 0, 2*maxFleetPools + 2, 2*maxFleetPools + 2},
+		{"over-ready", []inventory.WorkerPool{{Name: "down", Replicas: 1, ReadyReplicas: 3}, {Name: "short", Replicas: 2, ReadyReplicas: 1}}, 2, 2, 0, 1, 4, 3},
+	} {
+		got := summarizePools(tc.in)
+		if got.Count != tc.count || len(got.Rows) != tc.rows || got.More != tc.more || got.Short != tc.short || got.Ready != tc.ready || got.Desired != tc.want {
+			t.Errorf("%s: %+v", tc.name, got)
+		}
+	}
+	in := []inventory.WorkerPool{{Name: "down", Replicas: 1, ReadyReplicas: 3}, {Name: "short", Replicas: 2, ReadyReplicas: 1}}
+	if got := summarizePools(in); got.Rows[0].Name != "short" {
+		t.Errorf("a pool with more ready workers than desired sorts before a short one: %+v", got.Rows)
+	}
+	// The snapshot is shared with the API and the Cluster page: its order stays.
+	if in[0].Name != "down" {
+		t.Errorf("summarizePools reordered its input: %+v", in)
+	}
+	// It misses no worker, so it keeps its place before a ready pool.
+	if got := summarizePools([]inventory.WorkerPool{{Name: "down", Replicas: 1, ReadyReplicas: 3}, {Name: "ready", Replicas: 2, ReadyReplicas: 2}}); got.Rows[0].Name != "down" {
+		t.Errorf("a pool with more ready workers than desired sorts after a ready one: %+v", got.Rows)
+	}
+}
+
 // Text from a snapshot is escaped: a crash message is the reporter's copy
 // of whatever the control plane said.
 func TestPagesEscapeSnapshotText(t *testing.T) {

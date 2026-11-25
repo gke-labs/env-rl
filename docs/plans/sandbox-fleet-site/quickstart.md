@@ -1,6 +1,6 @@
 # Quickstart: deploy the fleet site
 
-Status: plan-stage runbook, written 2026-11-04; last checked 2026-11-26 against `7df41c1`. The
+Status: plan-stage runbook, written 2026-11-04; last checked 2026-11-26 against `7c04afa`. The
 Terraform in pull request 6 of the [execution plan](./execution-plan.md) replaces the `gcloud`
 commands below with one `apply` per project; `docs/fleet-site.md` then becomes the user-facing
 guide. Until then this is the order of operations and the exact resources, with the open parameters

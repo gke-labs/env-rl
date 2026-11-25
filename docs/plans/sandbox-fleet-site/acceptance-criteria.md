@@ -1,6 +1,6 @@
 # Acceptance criteria: sandbox fleet site
 
-Status: accepted (#223); last checked 2026-11-26 against `7df41c1`. Each criterion has a command and
+Status: accepted (#223); last checked 2026-11-26 against `7c04afa`. Each criterion has a command and
 an expected result. Evidence goes into `evidence/` in this directory, one file per acceptance pass,
 with the commit of each component.
 
@@ -22,6 +22,7 @@ with the commit of each component.
 | FS-14 | Reporter against the Kind Substrate      | 3     |
 | FS-15 | Reporter tick telemetry                  | 3, 4  |
 | FS-16 | Target identity on ate-env-api spans     | 9     |
+| FS-17 | Fleet page at scale                      | 5     |
 | FS-19 | Run trace is readable                    | 6     |
 
 ## FS-1: Inventory freshness
@@ -215,6 +216,23 @@ Added by pull request 7.
   refuse is not stamped. No span attribute, status or event carries the caller's bearer token.
 - Pass rule: the named tests pass in the Go CI job, and in a Cloud Trace query on `ate.actor.name`
   an environment's `ate-env-api` and `ateapi` spans come up together.
+
+## FS-17: Fleet page at scale
+
+Added by pull request 4b.
+
+- Command:
+  `go test -race -run 'TestFleetPageSummarizesWorkerPools|TestSummarizePoolsBounds|TestSiteColumnsDoNotStretch' ./internal/fleetsite`;
+  then serve a snapshot of a cluster with more than ten WorkerPools and three `ate-env-api`
+  deployments with `ate-env-fleet-site -dir` and open `/` in a browser.
+- Expected: each cluster's WorkerPools table names the number of pools, the sum of ready and desired
+  workers and, when some pool has fewer ready than desired workers, how many are short. A cluster
+  without pools shows only "WorkerPools". The table lists at most ten pools, the ones missing the
+  most workers first and the snapshot's order among equals, and links the rest as "N more on the
+  cluster page" to the Cluster page. Tables side by side keep their own height, so every deployment
+  row shows right under the table's header.
+- Pass rule: the named tests pass in the Go CI job, and in the browser the deployments table is no
+  taller than its rows.
 
 ## FS-19: Run trace is readable
 

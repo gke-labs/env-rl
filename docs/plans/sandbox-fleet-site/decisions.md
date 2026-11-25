@@ -365,3 +365,21 @@ Append-only. Each entry: date, who, what, why.
 - 2026-11-26, orchestrator, pull request 5c: drift check against `main` at `7df41c1` (research.md,
   "Audit of main, 2026-11-26, for pull request 5c"). The seven steps hold. The repository moved to
   `gke-labs/env-rl` with its history, so pull request numbers from #1 on are the new repository's.
+- 2026-11-25, orchestrator, pull request 4b: the Fleet page summarizes a cluster's WorkerPools. On a
+  dev GKE cluster it listed all 125, and one cluster took several screens. The table's caption names
+  the number of pools, the ready and desired workers summed, and how many pools are short. The table
+  lists at most ten pools, the ones missing the most workers first and the snapshot's order among
+  equals, so a short pool is never hidden behind a ready one, and "N more on the cluster page" links
+  the rest. A cluster of ten pools or fewer still shows all of them. Ten rows keep a cluster within
+  one screen (363 px of tables on a dev GKE cluster, from 3,394 px); the Cluster page keeps every
+  pool with its capacity. During a scale-down a pool can have more ready workers than desired. It
+  counts as not short, and the sum shows the ready workers as they are. The JSON API keeps every
+  WorkerPool, since a script wants them all. FS-17 covers the page.
+- 2026-11-25, orchestrator, pull request 4b: `.cols` sets `align-items: flex-start`. A flex item
+  stretches to the line's tallest item by default, and Chrome spreads a stretched table's extra
+  height over its rows: beside the 125 WorkerPool rows, the header and the three rows of the
+  deployments table were 826 to 842 px tall each, so one deployment row showed per screen under a
+  grey header block. With the fix the table is 134 px. The Cluster page's atespace and tag tables
+  share the class and the fix.
+- 2026-11-26, orchestrator, pull request 4b: drift check against `main` at `7c04afa` (research.md,
+  "Audit of main, 2026-11-26, for pull request 4b"). The seven steps hold.

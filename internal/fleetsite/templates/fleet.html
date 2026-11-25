@@ -17,7 +17,7 @@ limitations under the License.
 <h1>Fleet</h1>
 <p class="totals">{{len .Rows}} clusters · {{.Deployments}} ate-env-api deployments · {{.Actors}} actors{{if .Stale}} · <span class="badge stale">{{.Stale}} stale</span>{{end}} · <a href="/api/v1/clusters">JSON</a></p>
 {{if not .Rows}}<p>The bucket has no snapshot yet. Each cluster's ate-env-reporter writes one under v1/inventory/.</p>{{end}}
-{{range .Rows}}
+{{range $row := .Rows}}
 <section class="cluster">
   <h2><a href="{{clusterURL .Project .Cluster}}">{{.Project}} / {{.Cluster}}</a>{{with .Location}} <span class="muted">{{.}}</span>{{end}}
     {{if .Stale}}<span class="badge stale">stale{{if .GeneratedAt}} {{age .Age}}{{end}}</span>{{else}}<span class="badge fresh">{{age .Age}} old</span>{{end}}</h2>
@@ -37,10 +37,11 @@ limitations under the License.
       {{else}}<tr><td colspan="5" class="muted">none</td></tr>{{end}}
     </table>
     <table>
-      <caption>WorkerPools</caption>
+      <caption>WorkerPools{{with .Pools.Count}}: {{.}}, {{$row.Pools.Ready}} / {{$row.Pools.Desired}} workers ready{{end}}{{if .Pools.Short}} · <span class="warn">{{.Pools.Short}} short</span>{{end}}</caption>
       <tr><th>Pool</th><th>Ready / desired</th><th>Sandbox</th></tr>
-      {{range .WorkerPools}}<tr><td>{{.Namespace}}/{{.Name}}</td><td{{if lt .ReadyReplicas .Replicas}} class="warn"{{end}}>{{.ReadyReplicas}} / {{.Replicas}}</td><td>{{.SandboxClass}}</td></tr>
+      {{range .Pools.Rows}}<tr><td>{{.Namespace}}/{{.Name}}</td><td{{if lt .ReadyReplicas .Replicas}} class="warn"{{end}}>{{.ReadyReplicas}} / {{.Replicas}}</td><td>{{.SandboxClass}}</td></tr>
       {{else}}<tr><td colspan="3" class="muted">none</td></tr>{{end}}
+      {{with .Pools.More}}<tr><td colspan="3"><a href="{{clusterURL $row.Project $row.Cluster}}">{{.}} more on the cluster page</a></td></tr>{{end}}
     </table>
   </div>
   {{end}}
