@@ -149,6 +149,27 @@ let
     export NIX_SSL_CERT_FILE="''${NIX_SSL_CERT_FILE:-''${SSL_CERT_FILE}}"
     export GIT_SSL_CAINFO="''${GIT_SSL_CAINFO:-''${SSL_CERT_FILE}}"
     export GOTOOLCHAIN="local"
+  ''
+  # Name the Nix glibc dynamic linker in CGO_LDFLAGS. The cc-wrapper adds it
+  # to every cgo link, but Go only sees CC=gcc, so its build cache keys don't
+  # change when a nixpkgs bump moves glibc, and a restored cache hands back
+  # cgo executables (`go tool` and `go run` cache them) whose interpreter path
+  # no longer exists. Go hashes CGO_LDFLAGS into the keys of the cgo packages
+  # (runtime/cgo, net, os/user) and of the packages that import them, so a
+  # glibc move rebuilds those and keeps the rest of the cache.
+  # `-g -O2` is cgo's default when CGO_LDFLAGS is unset. The case keeps it
+  # idempotent: ci-go and friends run this again inside the devShell, and a
+  # second copy of the flag would change the keys between the two.
+  + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+    case " ''${CGO_LDFLAGS:-} " in
+      *" -Wl,--dynamic-linker=${pkgs.stdenv.cc.bintools.dynamicLinker} "*) ;;
+      *)
+        CGO_LDFLAGS="''${CGO_LDFLAGS:--g -O2} -Wl,--dynamic-linker=${pkgs.stdenv.cc.bintools.dynamicLinker}"
+        export CGO_LDFLAGS
+        ;;
+    esac
+  ''
+  + ''
     # The Python envs install this repository's projects editable, relative
     # to $REPO_ROOT (nix/python.nix).
     REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
