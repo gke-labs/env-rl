@@ -5,10 +5,11 @@ manifest) merged as #226, #348 and #349; pull requests 3 and 4, the telemetry ma
 with the Fleet and Cluster pages, merged as #415 and #416; pull request 5a, the Actor and Live pages
 and the metrics API, merged as #434; pull request 5b, the Runs page, merged as #437; pull request
 2c, the reporter's tracing and metrics, merged as #442; pull request 7, identity attributes on
-`ate-env-api` server spans, in review. Last checked 2026-11-18 against `gke-labs/env-rl` at
-`a0c6024f` and the Substrate `go.mod` requires, `v1.0.0`; the audit is in
-[research.md](./research.md), which first read `3b03b03` and `28520c0d` on 2026-10-30. The decisions
-taken so far are in [decisions.md](./decisions.md). Companions: [prd.md](./prd.md),
+`ate-env-api` server spans, merged as #443; pull request 5c, labels and service colors on the run
+trace, in review. Last checked 2026-11-26 against `gke-labs/env-rl` at `7df41c1` and the Substrate
+`go.mod` requires, `v1.0.0`; the audit is in [research.md](./research.md), which first read
+`3b03b03` and `28520c0d` on 2026-10-30. The decisions taken so far are in
+[decisions.md](./decisions.md). Companions: [prd.md](./prd.md),
 [execution-plan.md](./execution-plan.md), [interfaces.md](./interfaces.md),
 [acceptance-criteria.md](./acceptance-criteria.md) and, for the order of operations with `gcloud`,
 [quickstart.md](./quickstart.md).

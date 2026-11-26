@@ -1,8 +1,8 @@
 # Acceptance criteria: sandbox fleet site
 
-Status: accepted (#223); last checked 2026-11-18 against `a0c6024f`. Each criterion has a command
-and an expected result. Evidence goes into `evidence/` in this directory, one file per acceptance
-pass, with the commit of each component.
+Status: accepted (#223); last checked 2026-11-26 against `7df41c1`. Each criterion has a command and
+an expected result. Evidence goes into `evidence/` in this directory, one file per acceptance pass,
+with the commit of each component.
 
 | ID    | Title                                    | Phase |
 | ----- | ---------------------------------------- | ----- |
@@ -22,6 +22,7 @@ pass, with the commit of each component.
 | FS-14 | Reporter against the Kind Substrate      | 3     |
 | FS-15 | Reporter tick telemetry                  | 3, 4  |
 | FS-16 | Target identity on ate-env-api spans     | 9     |
+| FS-19 | Run trace is readable                    | 6     |
 
 ## FS-1: Inventory freshness
 
@@ -214,3 +215,22 @@ Added by pull request 7.
   refuse is not stamped. No span attribute, status or event carries the caller's bearer token.
 - Pass rule: the named tests pass in the Go CI job, and in a Cloud Trace query on `ate.actor.name`
   an environment's `ate-env-api` and `ateapi` spans come up together.
+
+## FS-19: Run trace is readable
+
+Added by pull request 5c.
+
+- Command:
+  `go test -race -run 'TestSpanLabel|TestBarLabel|TestColorByService|TestRunPageWaterfallLabels|TestRunPageLegendWithoutErrors|TestBarOf' ./internal/fleetsite`;
+  then open `/runs/trainer/<id>` for a run with a few hundred spans.
+- Expected: each bar of the waterfall carries its span name after the last slash (the method of an
+  RPC name), at most 40 monospace cells and ending in an ellipsis when cut, with the full name, the
+  service when the span has one, the duration, the offset and "error" in its title. The label sits
+  inside the bar when it fits, else right of the bar when it fits there, else ending left of it.
+  Bars are colored by service in the order the services first appear, from six colors, with a
+  legend. An error bar is hatched red with a dark outline, and its label starts with a cross; its
+  row in the span table says "(error)". A service with only error bars gets no color. Span names are
+  escaped. The SVG scales without distortion between 640 and 960 px, so labels keep their fit, and
+  scrolls sideways below 640 px. The bar caps of `ParseRunTrace` do not change.
+- Pass rule: the named tests pass in the Go CI job, and in the page of the run every bar's label can
+  be read without hovering.

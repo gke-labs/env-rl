@@ -368,6 +368,38 @@ steps:
 
 The edge "`ate-env-api` spans lack identity attributes" above is closed by pull request 7.
 
+## Audit of main, 2026-11-26, for pull request 5c
+
+Checked against `gke-labs/env-rl` at `7df41c1`, for pull request 5c. The repository moved from
+`ai-on-gke/sandboxenv-rl` to `gke-labs/env-rl`: `b420e32` starts the new repository and #1
+(`d80e332`) merges the imported history (`5770309`) with its commit ids kept, so `a0c6024f` is an
+ancestor of `7df41c1`. Pull request numbers from #1 on are `gke-labs/env-rl`'s; the numbers this
+plan cites up to #443 are `ai-on-gke/sandboxenv-rl`'s. Since `a0c6024f`, the last audit: #443
+(`441aa2c`) is pull request 7. #41 points references at `gke-labs/env-rl`: in this plan the audit
+lines above, and the `$id` of `internal/inventory/v1/snapshot.schema.json`, now under
+`https://gke-labs.github.io/env-rl/schema/inventory/v1/`; the reporter and the site validate against
+the embedded file and do not fetch the `$id`. #36 adds `SetEnvironmentTimeToLive` and
+`Environment.expire_time`, kept in ConfigMaps of `ate-env-api`'s namespace, which the snapshot does
+not carry. #51 lowers the defaults of `ate-env manifest template`. #34, #45, #50 and #57 are plans
+of other directories, #42 changes the guest, and #3, #4, #5, #40, #55 and #56 are CI and dependency
+bumps. The seven steps:
+
+1. `env.proto` has eleven RPCs: #36 adds `SetEnvironmentTimeToLive`, which changes one environment's
+   deadline. No call lists across atespaces or watches, so the reporter is unchanged.
+2. Substrate is still `v1.0.0`: #3 bumps `google.golang.org/api` and its indirect modules only, and
+   `go.ate.dev/substrate` is unchanged in `go.mod` and `go.sum`.
+3. `internal/inventory` changes the schema `$id` only (#41); `go test ./internal/inventory/` passes,
+   and the example of `interfaces.md` parses equal to `snapshot.golden.json`.
+4. `docs/metrics.md` gains `ate_env_api_deadline_delete_failed_total` (#36); the four
+   `ate_env_api_*` families the named queries use are unchanged. Substrate's registry is the same
+   version.
+5. `ate-env manifest` keeps every flag and subcommand of step 5. #36 adds `update` to the Role of
+   `--environment-metadata`, and #51 changes the `--cpu` and `--memory` defaults of `template`.
+6. `cmd/benchmarking/bench/bundle.go` is unchanged. `internal/benchmarking/schema` changes its
+   schema `$id` base only (#41); `CheckFolderName` is unchanged.
+7. `FS-` is used by this plan only. Pull request 5c adds FS-19; FS-17 and FS-18 are taken by the
+   Fleet and Cluster page changes in review (#59, #60).
+
 ## Sources
 
 - Substrate: `docs/observability.md`, `internal/actorevent/actorevent.go`,

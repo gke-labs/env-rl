@@ -411,23 +411,147 @@ func (s *Server) apiRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, d)
 }
 
-// waterfallBar is one bar of the SVG, in percent of the run span.
+// waterfallWidth is the width of the waterfall SVG in its own units. The page
+// scales the SVG without distortion, so a label that fits here fits on screen.
+const waterfallWidth = 960
+
+// labelCharWidth is the advance of one character of the waterfall's label
+// font, `.span-label { font: 10px ui-monospace, monospace }` in site.css
+// (0.6 em), rounded up; change both together.
+const labelCharWidth = 6.2
+
+// labelPad is the space between a label and the edge of its bar.
+const labelPad = 3
+
+// maxLabelCells bounds a bar label, in monospace cells; the full name stays
+// in the bar's title.
+const maxLabelCells = 40
+
+// waterfallRow is the height of one row of the waterfall; a bar is 2 less.
+const waterfallRow = 16
+
+// serviceColors is the number of svc-N classes in site.css.
+const serviceColors = 6
+
+// waterfallBar is one bar of the SVG, in waterfallWidth units. Label is the
+// bar's short name, drawn at LabelX inside the bar, to its right or, with
+// LabelEnd, ending left of it; empty for a span without a name.
 type waterfallBar struct {
 	WaterfallSpan
 	X, Width, Y float64
 	Indent      int
+	Color       int
+	Label       string
+	LabelX      float64
+	LabelEnd    bool
 }
 
-// barOf places a span on the run span's 0..100: both ends are clamped, so a
-// span outside the run shows as a sliver at its edge.
+// barOf places a span on the run span's 0..waterfallWidth: both ends are
+// clamped, so a span outside the run shows as a sliver at its edge.
 func barOf(sp WaterfallSpan, runMS float64, i int) waterfallBar {
-	start := min(max(100*sp.OffsetMS/runMS, 0), 100)
-	end := min(max(100*(sp.OffsetMS+sp.DurMS)/runMS, 0), 100)
+	start := min(max(waterfallWidth*sp.OffsetMS/runMS, 0), waterfallWidth)
+	end := min(max(waterfallWidth*(sp.OffsetMS+sp.DurMS)/runMS, 0), waterfallWidth)
 	x, w := start, end-start
-	if w < 0.1 {
-		x, w = min(x, 99.9), 0.1
+	if w < 1 {
+		x, w = min(x, waterfallWidth-1), 1
 	}
-	return waterfallBar{WaterfallSpan: sp, X: x, Width: w, Y: float64(i * 14), Indent: min(sp.Depth, 12) * 8}
+	b := waterfallBar{WaterfallSpan: sp, X: x, Width: w, Y: float64(i * waterfallRow), Indent: min(sp.Depth, 12) * 8}
+	b.placeLabel()
+	return b
+}
+
+// placeLabel puts the bar's short name inside the bar when it fits, else to
+// its right when it fits there, else to its left: a label of at most
+// maxLabelCells+3 cells (the cross takes two) is narrower than half of
+// waterfallWidth, so it fits on one side. An error span's label starts with a
+// cross, so the error does not rest on color alone.
+func (b *waterfallBar) placeLabel() {
+	label := spanLabel(b.Name)
+	if label == "" {
+		return
+	}
+	if b.Error {
+		label = "✕ " + label
+	}
+	need := labelWidth(label) + 2*labelPad
+	switch {
+	case b.Width >= need:
+		b.LabelX = b.X + labelPad
+	case b.X+b.Width+need <= waterfallWidth:
+		b.LabelX = b.X + b.Width + labelPad
+	default:
+		b.LabelX, b.LabelEnd = b.X-labelPad, true
+	}
+	b.Label = label
+}
+
+// cellsOf is the number of monospace cells a rune takes: two for Hangul
+// Jamo, the emoji-presentation symbols of U+231A to U+23FF and U+2600 to
+// U+27BF, and everything from U+2E80 on (CJK, emoji), else one.
+func cellsOf(r rune) int {
+	switch {
+	case r >= 0x1100 && r <= 0x115F, r >= 0x231A && r <= 0x23FF, r >= 0x2600 && r <= 0x27BF, r >= 0x2E80:
+		return 2
+	}
+	return 1
+}
+
+// labelWidth estimates a label's width in waterfall units.
+func labelWidth(label string) float64 {
+	cells := 0
+	for _, r := range label {
+		cells += cellsOf(r)
+	}
+	return float64(cells) * labelCharWidth
+}
+
+// spanLabel shortens a span name to what follows its last slash, the method
+// of an RPC name, cut to maxLabelCells cells with an ellipsis.
+func spanLabel(name string) string {
+	name = strings.TrimSpace(name)
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		if method := strings.TrimSpace(name[i+1:]); method != "" {
+			name = method
+		}
+	}
+	cells, cut := 0, -1
+	for i, r := range name {
+		cells += cellsOf(r)
+		if cut < 0 && cells > maxLabelCells-1 {
+			cut = i
+		}
+		if cells > maxLabelCells {
+			return name[:cut] + "…"
+		}
+	}
+	return name
+}
+
+// serviceKey is one service of the waterfall's legend.
+type serviceKey struct {
+	Name  string
+	Color int
+}
+
+// colorByService gives each service of the bars a color in the order the
+// services first appear, and returns the legend. Error bars are hatched red
+// whatever their service, so a service with only error bars gets no color.
+func colorByService(bars []waterfallBar) []serviceKey {
+	index := map[string]int{}
+	var keys []serviceKey
+	for i := range bars {
+		if bars[i].Error {
+			continue
+		}
+		c, ok := index[bars[i].Service]
+		if !ok {
+			c = len(keys) % serviceColors
+			index[bars[i].Service] = c
+			keys = append(keys, serviceKey{Name: bars[i].Service, Color: c})
+		}
+		bars[i].Color = c
+	}
+	return keys
 }
 
 func (s *Server) runPage(w http.ResponseWriter, r *http.Request) {
@@ -451,8 +575,15 @@ func (s *Server) runPage(w http.ResponseWriter, r *http.Request) {
 		for i, sp := range d.Trace.Spans {
 			bars = append(bars, barOf(sp, d.Trace.DurationMS, i))
 		}
+		data["Services"] = colorByService(bars)
+		hasError := false
+		for _, b := range bars {
+			hasError = hasError || b.Error
+		}
+		data["HasError"] = hasError
 		data["Bars"] = bars
-		data["Height"] = len(bars)*14 + 2
+		data["Width"] = waterfallWidth
+		data["Height"] = len(bars)*waterfallRow + 2
 	}
 	s.render(w, r, http.StatusOK, "run.html", data)
 }

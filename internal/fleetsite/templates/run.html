@@ -34,14 +34,16 @@ limitations under the License.
   {{with $r.Trace}}
   <h2>Trace</h2>
   <p>{{if $r.TraceURL}}<a href="{{$r.TraceURL}}" rel="noopener noreferrer" target="_blank">{{.TraceID}}</a> in Cloud Trace{{else}}<span class="mono">{{.TraceID}}</span> <span class="muted">(the span file names no project, so no Cloud Trace link)</span>{{end}} · {{ms .DurationMS}} ms{{if .Omitted}} · the first 300 spans shown, {{.Omitted}} more{{end}}</p>
+  <p class="legend">{{range $.Services}}<span class="swatch svc-{{.Color}}"></span>{{or .Name "no service"}} {{end}}{{if $.HasError}}<span class="swatch span-error"></span>error ✕{{end}}</p>
   <div class="waterfall">
-    <svg viewBox="0 0 100 {{$.Height}}" height="{{$.Height}}" preserveAspectRatio="none" role="img">
-      {{range $.Bars}}<rect class="{{if .Error}}span-error{{else}}span-ok{{end}}" x="{{.X}}" y="{{.Y}}" width="{{.Width}}" height="12"><title>{{.Name}}{{with .Service}} ({{.}}){{end}}: {{ms .DurMS}} ms at +{{ms .OffsetMS}} ms</title></rect>{{end}}
+    <svg viewBox="0 0 {{$.Width}} {{$.Height}}" width="{{$.Width}}" height="{{$.Height}}" role="img" aria-label="Trace waterfall: one bar per span, listed in the table below">
+      <defs><pattern id="span-err" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#d93025"></rect><rect width="2" height="6" fill="#fce8e6"></rect></pattern></defs>
+      {{range $.Bars}}<g><title>{{.Name}}{{with .Service}} ({{.}}){{end}}: {{ms .DurMS}} ms at +{{ms .OffsetMS}} ms{{if .Error}}, error{{end}}</title><rect {{if .Error}}class="span-error" fill="url(#span-err)"{{else}}class="svc-{{.Color}}"{{end}} x="{{ms .X}}" y="{{.Y}}" width="{{ms .Width}}" height="14"></rect>{{if .Label}}<text class="span-label{{if .LabelEnd}} end{{end}}" x="{{ms .LabelX}}" y="{{.Y}}" dy="10.5">{{.Label}}</text>{{end}}</g>{{end}}
     </svg>
   </div>
   <table>
     <tr><th>Span</th><th>Service</th><th>Start, ms</th><th>Duration, ms</th></tr>
-    {{range $.Bars}}<tr><td class="indent-{{.Indent}}{{if .Error}} error{{end}}">{{.Name}}</td><td>{{.Service}}</td><td>{{ms .OffsetMS}}</td><td>{{ms .DurMS}}</td></tr>{{end}}
+    {{range $.Bars}}<tr><td class="indent-{{.Indent}}{{if .Error}} error{{end}}">{{.Name}}{{if .Error}} (error){{end}}</td><td>{{.Service}}</td><td>{{ms .OffsetMS}}</td><td>{{ms .DurMS}}</td></tr>{{end}}
   </table>
   {{end}}
 {{else}}
