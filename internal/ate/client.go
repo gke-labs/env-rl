@@ -94,6 +94,10 @@ var ErrNotFound = errors.New("not found")
 // ErrAlreadyExists is returned when a resource with the same name exists.
 var ErrAlreadyExists = errors.New("already exists")
 
+// egressPolicyName is the name of an actor's egress policy. Substrate's
+// EgressPolicy is a singleton subresource of its actor.
+const egressPolicyName = "default"
+
 // Options configures a Client.
 type Options struct {
 	// ControlAddr is the ateapi gRPC endpoint, e.g. "localhost:8080"
@@ -688,6 +692,72 @@ func (c *Client) DeleteActorTemplate(ctx context.Context, atespace, name, uid st
 		return fmt.Errorf("ate: deleting template %q: %w", name, wrapGRPCError(err))
 	}
 	return nil
+}
+
+// CreateEgressPolicy creates the egress policy of the actor with ID in
+// atespace with rules, and returns it as stored, with Substrate's port
+// defaults applied. No rules is a policy that denies all egress. A second
+// create is ErrAlreadyExists. A create under a missing actor is Substrate's
+// FailedPrecondition. If atespace is empty, DefaultAtespace is used.
+func (c *Client) CreateEgressPolicy(ctx context.Context, atespace, id string, rules []*ateapipb.EgressRule) (*ateapipb.EgressPolicy, error) {
+	if id == "" {
+		return nil, errors.New("ate: id is required")
+	}
+	ref := c.ref(atespace, id)
+	created, err := c.control.CreateActorEgressPolicy(ctx, &ateapipb.CreateActorEgressPolicyRequest{
+		Actor: ref,
+		EgressPolicy: &ateapipb.EgressPolicy{
+			Metadata: &ateapipb.ResourceMetadata{Atespace: ref.GetAtespace(), Name: egressPolicyName},
+			Rules:    rules,
+		},
+	})
+	if err != nil {
+		if status.Code(err) == codes.AlreadyExists {
+			return nil, fmt.Errorf("ate: creating egress policy of %q: %w: %s", id, ErrAlreadyExists, status.Convert(err).Message())
+		}
+		return nil, fmt.Errorf("ate: creating egress policy of %q: %w", id, wrapGRPCError(err))
+	}
+	return created, nil
+}
+
+// GetEgressPolicy reads the egress policy of the actor with ID in atespace.
+// An actor without a policy, or a missing actor, is ErrNotFound. If atespace
+// is empty, DefaultAtespace is used.
+func (c *Client) GetEgressPolicy(ctx context.Context, atespace, id string) (*ateapipb.EgressPolicy, error) {
+	if id == "" {
+		return nil, errors.New("ate: id is required")
+	}
+	policy, err := c.control.GetActorEgressPolicy(ctx, &ateapipb.GetActorEgressPolicyRequest{Actor: c.ref(atespace, id), Name: egressPolicyName})
+	if err != nil {
+		return nil, fmt.Errorf("ate: getting egress policy of %q: %w", id, wrapGRPCError(err))
+	}
+	return policy, nil
+}
+
+// UpdateEgressPolicy replaces the rules of the egress policy of the actor
+// with ID in atespace, and returns it as stored. It writes only while the
+// policy still has uid and version, as read by GetEgressPolicy: a policy
+// written or recreated since is Substrate's Aborted. A missing policy is
+// ErrNotFound. If atespace is empty, DefaultAtespace is used.
+func (c *Client) UpdateEgressPolicy(ctx context.Context, atespace, id, uid string, version int64, rules []*ateapipb.EgressRule) (*ateapipb.EgressPolicy, error) {
+	if id == "" {
+		return nil, errors.New("ate: id is required")
+	}
+	if uid == "" || version == 0 {
+		return nil, errors.New("ate: egress policy uid and version are required")
+	}
+	ref := c.ref(atespace, id)
+	updated, err := c.control.UpdateActorEgressPolicy(ctx, &ateapipb.UpdateActorEgressPolicyRequest{
+		Actor: ref,
+		EgressPolicy: &ateapipb.EgressPolicy{
+			Metadata: &ateapipb.ResourceMetadata{Atespace: ref.GetAtespace(), Name: egressPolicyName, Uid: uid, Version: version},
+			Rules:    rules,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ate: updating egress policy of %q: %w", id, wrapGRPCError(err))
+	}
+	return updated, nil
 }
 
 func (c *Client) ref(atespace, id string) *ateapipb.ObjectRef {
