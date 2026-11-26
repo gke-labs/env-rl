@@ -343,3 +343,25 @@ Append-only. Each entry: date, who, what, why.
 - 2026-11-18, orchestrator, pull request 7: drift check against `main` at `a0c6024f` (research.md,
   "Audit of main, 2026-11-18, for pull request 7"). The seven steps hold. Step 6 now names
   `internal/benchmarking/schema.CheckFolderName`, where #437 moved the folder form.
+- 2026-11-26, orchestrator, pull request 5c: the Run page's waterfall had no labels; a span's name
+  showed only on hover or in the table below, so a trace of 224 spans from a dev cluster could not
+  be read. Each bar now carries its span name after the last slash, which for an RPC is its method.
+  The SVG drew in percent with `preserveAspectRatio="none"`, which stretches text, so it now draws
+  in 960 units, its widest size on the page, and scales without distortion. With a monospace label
+  font a label's width is known on the server: it goes inside the bar, else right of it, else ending
+  left of it. A label is at most 40 monospace cells (a Hangul Jamo, CJK or emoji rune counts two,
+  from fixed ranges, not the full East Asian Width table) plus the error cross, under half the
+  width, so one side always has room. Below 640 px the waterfall scrolls sideways instead of
+  shrinking the labels further. No script is needed, which the site's CSP forbids. Bars are colored
+  by service from a fixed palette of six, in the order the services first appear, with a legend. Red
+  stays the error meaning: an error bar is hatched red with a dark outline, and its label starts
+  with a cross, so the error does not rest on color alone; the span table says "(error)" for screen
+  readers. A service with only error bars gets no color or legend swatch. The hatch is an SVG
+  pattern the bar names with a `fill` attribute, because a fragment-only `url(#id)` in an external
+  stylesheet does not resolve to the page in every browser. Rows grow from 14 to 16 units to fit the
+  10-unit font. A gutter of names or an indent by depth was left out: the labels name each bar, and
+  the table below keeps the depth. `ParseRunTrace` and its 300-bar cap do not change. FS-19 covers
+  it.
+- 2026-11-26, orchestrator, pull request 5c: drift check against `main` at `7df41c1` (research.md,
+  "Audit of main, 2026-11-26, for pull request 5c"). The seven steps hold. The repository moved to
+  `gke-labs/env-rl` with its history, so pull request numbers from #1 on are the new repository's.

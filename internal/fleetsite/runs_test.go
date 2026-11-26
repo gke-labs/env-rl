@@ -481,12 +481,12 @@ func TestBarOf(t *testing.T) {
 		sp   WaterfallSpan
 		x, w float64
 	}{
-		{WaterfallSpan{OffsetMS: 100, DurMS: 200}, 10, 20},
-		{WaterfallSpan{OffsetMS: -5000, DurMS: 4000}, 0, 0.1}, // all before the run
-		{WaterfallSpan{OffsetMS: -100, DurMS: 300}, 0, 20},    // starts before the run
-		{WaterfallSpan{OffsetMS: 900, DurMS: 500}, 90, 10},    // ends after the run
-		{WaterfallSpan{OffsetMS: 2000, DurMS: 10}, 99.9, 0.1}, // all after the run
-		{WaterfallSpan{OffsetMS: 500, DurMS: 0}, 50, 0.1},
+		{WaterfallSpan{OffsetMS: 100, DurMS: 200}, 96, 192},
+		{WaterfallSpan{OffsetMS: -5000, DurMS: 4000}, 0, 1}, // all before the run
+		{WaterfallSpan{OffsetMS: -100, DurMS: 300}, 0, 192}, // starts before the run
+		{WaterfallSpan{OffsetMS: 900, DurMS: 500}, 864, 96}, // ends after the run
+		{WaterfallSpan{OffsetMS: 2000, DurMS: 10}, 959, 1},  // all after the run
+		{WaterfallSpan{OffsetMS: 500, DurMS: 0}, 480, 1},
 	} {
 		b := barOf(tc.sp, 1000, 0)
 		if diff := b.X - tc.x; diff > 1e-9 || diff < -1e-9 || b.Width-tc.w > 1e-9 || tc.w-b.Width > 1e-9 {
@@ -586,7 +586,7 @@ func TestRunsPages(t *testing.T) {
 		`href="/runs/trainer/grpo-e1/files/report.html"`,
 		`href="https://console.cloud.google.com/traces/list?project=proj-a&amp;tid=` + runTrace + `"`,
 		`class="span-error"`, "ateenv.v1alpha.EnvironmentService/CreateEnvironment",
-		`href="/runs/trainer/grpo-e1/files/spans.jsonl"`, `viewBox="0 0 100 44" height="44"`,
+		`href="/runs/trainer/grpo-e1/files/spans.jsonl"`, `viewBox="0 0 960 50" width="960" height="50"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("trainer run page lacks %q", want)

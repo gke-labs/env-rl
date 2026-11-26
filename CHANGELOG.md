@@ -7,6 +7,11 @@ user needs to know across them.
 ## Unreleased
 
 ### Changed
+- `ate-env-fleet-site`: the Run page's trace waterfall labels each bar with
+  its span name (the method of an RPC name), inside the bar or next to it, so
+  a trace of a few hundred spans reads without hovering. Bars are colored by
+  service with a legend. Error bars stay red, now hatched and outlined, and
+  their label starts with a cross.
 - `ate-env manifest template` now defaults `--cpu` to `1` and `--memory` to
   `2Gi` (previously `2` and `4Gi`). Substrate books both limits directly
   against worker capacity, so 1 CPU and 2 GiB double default worker slot

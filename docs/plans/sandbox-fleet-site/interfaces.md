@@ -1,6 +1,6 @@
 # Interface contracts: sandbox fleet site
 
-Status: accepted (#223); last checked 2026-11-18 against `a0c6024f`. The snapshot schema in the next
+Status: accepted (#223); last checked 2026-11-26 against `7df41c1`. The snapshot schema in the next
 section is code since pull request 1 (#226, `internal/inventory`): its object kinds, field names and
 rules are fixed, and a change to them is a schema change. The names in the other sections (bucket
 layout, reporter flags and identity, event stream and tables, collector pipelines, site routes and
@@ -331,20 +331,21 @@ flight) answers 502. A trainer run page shows each RunReport JSON (the files nam
 `NaN`, is a note), a link to `report.html`, the Cloud Trace link of the latest `ate_env_fleet.run`
 span in `spans.jsonl` (the project is that span's `gcp.project_id` resource attribute, else
 `cloud.account.id`, else `FLEET_TRACE_PROJECT`; without one the trace id shows as text) and a
-waterfall of that trace's first 300 spans. A bundle page shows `run_window.json`, `report.json` and
-`system_description.json` as indented JSON (at most 256 KiB each) and marks a `_traced` folder. What
-a run page shows is built once per change of the run's file listing, cached 60 s, shared by
-concurrent views, and at most two are built at a time. A run file is served from
-`/runs/<source>/files/<name>` only when the run's listing has it, always as a download,
-`report.html` too, so no script from a run folder runs on the site's origin. A run file is read up
-to 64 MiB.
+waterfall of that trace's first 300 spans: each bar is labeled with its span name after the last
+slash, colored by service with a legend, and an error bar is hatched and its label starts with a
+cross (FS-19). A bundle page shows `run_window.json`, `report.json` and `system_description.json` as
+indented JSON (at most 256 KiB each) and marks a `_traced` folder. What a run page shows is built
+once per change of the run's file listing, cached 60 s, shared by concurrent views, and at most two
+are built at a time. A run file is served from `/runs/<source>/files/<name>` only when the run's
+listing has it, always as a download, `report.html` too, so no script from a run folder runs on the
+site's origin. A run file is read up to 64 MiB.
 
 | Route                                                                                       | Returns                                                                                                                                                                                                    | Pull request |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
 | `GET /`                                                                                     | Fleet page                                                                                                                                                                                                 | 4            |
 | `GET /clusters/{project}/{cluster}`                                                         | Cluster page; `?atespace=&template=&state=&node=` filter the actors, the first 1000 shown                                                                                                                  | 4            |
 | `GET /actors/{uid}`                                                                         | Actor page: the actor in the snapshots, its transitions since `?since=` (default 24 h) with a Cloud Trace link each, its crash record; the events route's limit                                            | 5a           |
-| `GET /runs`, `GET /runs/trainer/{id}`, `GET /runs/bench/{bucket}/{id}`                      | the run index; one trainer run or one bundle (FS-11)                                                                                                                                                       | 5b           |
+| `GET /runs`, `GET /runs/trainer/{id}`, `GET /runs/bench/{bucket}/{id}`                      | the run index; one trainer run or one bundle (FS-11)                                                                                                                                                       | 5b, 5c       |
 | `GET /runs/trainer/{id}/files/{name}`, `GET /runs/bench/{bucket}/{id}/files/{name}`         | one listed file of the run, as a download                                                                                                                                                                  | 5b           |
 | `GET /api/v1/runs`, `GET /api/v1/runs/trainer/{id}`, `GET /api/v1/runs/bench/{bucket}/{id}` | the index `{"runs", "truncated", "errors"}`; one run with its files, reports, trace and bundle files                                                                                                       | 5b           |
 | `GET /live`                                                                                 | Live page: the newest 200 transitions of the last hour, newest first; reloads every 10 s with `<meta http-equiv="refresh">`, no script                                                                     | 5a           |

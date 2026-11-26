@@ -1,8 +1,8 @@
 # Execution plan: sandbox fleet site
 
-Status: accepted (#223); pull requests 1, 2, 2b, 3, 4, 5a, 5b and 2c merged (#226, #348, #349, #415,
-#416, #434, #437, #442); pull request 7, identity attributes on `ate-env-api` server spans, is in
-review; 6 is not started. Last checked 2026-11-18 against `a0c6024f`. Design:
+Status: accepted (#223); pull requests 1, 2, 2b, 3, 4, 5a, 5b, 2c and 7 merged (#226, #348, #349,
+#415, #416, #434, #437, #442, #443); pull request 5c, labels and service colors on the run trace, is
+in review; 6 is not started. Last checked 2026-11-26 against `7df41c1`. Design:
 [README.md](./README.md). Contracts: [interfaces.md](./interfaces.md). Done when every criterion in
 [acceptance-criteria.md](./acceptance-criteria.md) passes on two clusters in two projects and the
 pull requests below are merged.
@@ -49,6 +49,7 @@ Phases 2, 3 and 4 run in parallel after phase 1.
 | 4   | `cmd/ate-env-fleet-site`: HTTP server, IAP verification, GCS and BigQuery readers, Fleet and Cluster pages, JSON API                                                                                                                                                                    | large  |
 | 5a  | Actor and Live pages, `/api/v1/live`, the PromQL proxy (`/api/v1/metrics/{name}`) with the allow-list of named queries                                                                                                                                                                  | medium |
 | 5b  | Runs page (the Cloud Trace link of a trainer run comes from the trace ids in its `spans.jsonl`; FS-11 lists how a run folder is produced with `RunReport.write`, `build_report.py` and one copy, so no trainer-side code is in scope)                                                   | medium |
+| 5c  | Run trace labels: each bar labeled with its short span name, bars colored by service with a legend, error bars hatched and marked (FS-19)                                                                                                                                               | small  |
 | 6   | `deploy/fleet-site/` Terraform and `docs/fleet-site.md`; a shell check that a two-bucket `BENCH_BUCKET` yields one `roles/storage.objectViewer` grant per bucket and one comma-separated `FLEET_BENCH_BUCKETS`                                                                          | medium |
 | 7   | identity attributes on `ate-env-api` server spans (FS-16)                                                                                                                                                                                                                               | small  |
 
