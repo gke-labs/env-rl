@@ -32,7 +32,7 @@ requires-python = ">=3.11"  # what e2b requires
 # cannot make the classes call E2B. tests/test_surface.py holds the structure.
 dependencies = [
   "ate-env-rl",
-  "e2b>=2.63,<3",
+  "e2b>=2.64.0,<3",
   # Imported by the package itself; e2b and ate-env-rl hold their versions.
   "grpcio",
   "httpx",
