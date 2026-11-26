@@ -36,15 +36,19 @@ const egressPolicyName = "default"
 // get, update or delete of a missing policy is NotFound; an update needs the
 // policy's uid and version (InvalidArgument without them, Aborted when either
 // is stale) and replaces the rules; the port defaults (80 for http, 443 for
-// https) are applied on each write; DeleteActor deletes the actor's policy.
-// The fake does not validate rules beyond that.
+// https) are applied on each write; a delete honors the uid and version of
+// DeleteOptions and returns the policy with its delete_time set; DeleteActor
+// deletes the actor's policy. Like Substrate's request validation, every call
+// needs the actor's atespace and name, and the policy name "default"; a write
+// needs metadata whose atespace is the actor's. The fake does not validate
+// rules beyond that.
 
 func (s *Server) CreateActorEgressPolicy(ctx context.Context, req *ateapipb.CreateActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ref := req.GetActor()
 	in := req.GetEgressPolicy()
-	if err := checkEgressPolicyMetadata(ref, in); err != nil {
+	if err := checkEgressPolicyWrite(ref, in); err != nil {
 		return nil, err
 	}
 	k := key(ref.GetAtespace(), ref.GetName())
@@ -78,10 +82,10 @@ func (s *Server) CreateActorEgressPolicy(ctx context.Context, req *ateapipb.Crea
 func (s *Server) GetActorEgressPolicy(ctx context.Context, req *ateapipb.GetActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := checkEgressPolicyName(req.GetName()); err != nil {
+	ref := req.GetActor()
+	if err := checkEgressPolicyRef(ref, req.GetName()); err != nil {
 		return nil, err
 	}
-	ref := req.GetActor()
 	p, ok := s.egressPolicies[key(ref.GetAtespace(), ref.GetName())]
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "EgressPolicy for actor %s/%s not found", ref.GetAtespace(), ref.GetName())
@@ -94,7 +98,7 @@ func (s *Server) UpdateActorEgressPolicy(ctx context.Context, req *ateapipb.Upda
 	defer s.mu.Unlock()
 	ref := req.GetActor()
 	in := req.GetEgressPolicy()
-	if err := checkEgressPolicyMetadata(ref, in); err != nil {
+	if err := checkEgressPolicyWrite(ref, in); err != nil {
 		return nil, err
 	}
 	md := in.GetMetadata()
@@ -121,10 +125,10 @@ func (s *Server) UpdateActorEgressPolicy(ctx context.Context, req *ateapipb.Upda
 func (s *Server) DeleteActorEgressPolicy(ctx context.Context, req *ateapipb.DeleteActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := checkEgressPolicyName(req.GetName()); err != nil {
+	ref := req.GetActor()
+	if err := checkEgressPolicyRef(ref, req.GetName()); err != nil {
 		return nil, err
 	}
-	ref := req.GetActor()
 	k := key(ref.GetAtespace(), ref.GetName())
 	p, ok := s.egressPolicies[k]
 	if !ok {
@@ -133,30 +137,69 @@ func (s *Server) DeleteActorEgressPolicy(ctx context.Context, req *ateapipb.Dele
 	if uid := req.GetOptions().GetUid(); uid != "" && uid != p.GetMetadata().GetUid() {
 		return nil, status.Error(codes.Aborted, "EgressPolicy UID conflict")
 	}
+	if v := req.GetOptions().GetVersion(); v != 0 && v != p.GetMetadata().GetVersion() {
+		return nil, status.Error(codes.Aborted, "EgressPolicy version conflict")
+	}
 	delete(s.egressPolicies, k)
-	return proto.Clone(p).(*ateapipb.EgressPolicy), nil
+	deleted := proto.Clone(p).(*ateapipb.EgressPolicy)
+	deleted.Metadata.DeleteTime = timestamppb.Now()
+	return deleted, nil
 }
 
-// checkEgressPolicyMetadata applies Substrate's checks of a written policy's
-// metadata: it is required, its name is empty or "default", and its atespace,
-// when set, is the actor's.
-func checkEgressPolicyMetadata(ref *ateapipb.ObjectRef, p *ateapipb.EgressPolicy) error {
+// checkEgressPolicyRef applies Substrate's checks of the actor reference and
+// the policy name of a get or a delete: the actor's atespace and name are
+// required, and the name is "default".
+func checkEgressPolicyRef(ref *ateapipb.ObjectRef, name string) error {
+	if err := checkActorRef(ref); err != nil {
+		return err
+	}
+	return checkEgressPolicyName("name", name)
+}
+
+// checkEgressPolicyWrite applies Substrate's checks of a create or an update:
+// the actor's atespace and name are required, and the policy's metadata is
+// required, with the name "default" and the actor's atespace.
+func checkEgressPolicyWrite(ref *ateapipb.ObjectRef, p *ateapipb.EgressPolicy) error {
+	if err := checkActorRef(ref); err != nil {
+		return err
+	}
+	if p == nil {
+		return status.Error(codes.InvalidArgument, "egress_policy is required")
+	}
 	md := p.GetMetadata()
 	if md == nil {
 		return status.Error(codes.InvalidArgument, "egress_policy.metadata is required")
 	}
-	if err := checkEgressPolicyName(md.GetName()); err != nil {
+	if err := checkEgressPolicyName("egress_policy.metadata.name", md.GetName()); err != nil {
 		return err
 	}
-	if md.GetAtespace() != "" && md.GetAtespace() != ref.GetAtespace() {
+	if md.GetAtespace() == "" {
+		return status.Error(codes.InvalidArgument, "egress_policy.metadata.atespace is required")
+	}
+	if md.GetAtespace() != ref.GetAtespace() {
 		return status.Errorf(codes.InvalidArgument, "egress_policy.metadata.atespace %q must match actor.atespace %q", md.GetAtespace(), ref.GetAtespace())
 	}
 	return nil
 }
 
-func checkEgressPolicyName(name string) error {
-	if name != "" && name != egressPolicyName {
-		return status.Errorf(codes.InvalidArgument, "name %q must be %q", name, egressPolicyName)
+func checkActorRef(ref *ateapipb.ObjectRef) error {
+	switch {
+	case ref == nil:
+		return status.Error(codes.InvalidArgument, "actor is required")
+	case ref.GetAtespace() == "":
+		return status.Error(codes.InvalidArgument, "actor.atespace is required")
+	case ref.GetName() == "":
+		return status.Error(codes.InvalidArgument, "actor.name is required")
+	}
+	return nil
+}
+
+func checkEgressPolicyName(field, name string) error {
+	if name == "" {
+		return status.Errorf(codes.InvalidArgument, "%s is required", field)
+	}
+	if name != egressPolicyName {
+		return status.Errorf(codes.InvalidArgument, "%s %q must be %q", field, name, egressPolicyName)
 	}
 	return nil
 }
