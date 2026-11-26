@@ -26,7 +26,10 @@ table { border-collapse: collapse; margin: 8px 16px 8px 0; }
 caption { text-align: left; font-weight: 600; padding: 4px 0; }
 th, td { border-bottom: 1px solid #e0e0e0; padding: 3px 8px; text-align: left; vertical-align: top; }
 th { background: #f1f3f4; font-weight: 600; }
-.cols { display: flex; flex-wrap: wrap; }
+/* Each table keeps its own height: a stretched table spreads the extra
+   height over its rows, so a short table beside a long one shows one
+   row per screen. */
+.cols { display: flex; flex-wrap: wrap; align-items: flex-start; }
 .cluster { border-top: 1px solid #dadce0; }
 .muted { color: #5f6368; }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }

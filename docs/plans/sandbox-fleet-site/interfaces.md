@@ -1,6 +1,6 @@
 # Interface contracts: sandbox fleet site
 
-Status: accepted (#223); last checked 2026-11-26 against `7df41c1`. The snapshot schema in the next
+Status: accepted (#223); last checked 2026-11-26 against `7c04afa`. The snapshot schema in the next
 section is code since pull request 1 (#226, `internal/inventory`): its object kinds, field names and
 rules are fixed, and a change to them is a schema change. The names in the other sections (bucket
 layout, reporter flags and identity, event stream and tables, collector pipelines, site routes and
@@ -342,7 +342,7 @@ site's origin. A run file is read up to 64 MiB.
 
 | Route                                                                                       | Returns                                                                                                                                                                                                    | Pull request |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `GET /`                                                                                     | Fleet page                                                                                                                                                                                                 | 4            |
+| `GET /`                                                                                     | Fleet page; per cluster the WorkerPool totals and at most 10 pools, short ones first, with a link to the Cluster page for the rest (FS-17)                                                                 | 4, 4b        |
 | `GET /clusters/{project}/{cluster}`                                                         | Cluster page; `?atespace=&template=&state=&node=` filter the actors, the first 1000 shown                                                                                                                  | 4            |
 | `GET /actors/{uid}`                                                                         | Actor page: the actor in the snapshots, its transitions since `?since=` (default 24 h) with a Cloud Trace link each, its crash record; the events route's limit                                            | 5a           |
 | `GET /runs`, `GET /runs/trainer/{id}`, `GET /runs/bench/{bucket}/{id}`                      | the run index; one trainer run or one bundle (FS-11)                                                                                                                                                       | 5b, 5c       |

@@ -1,6 +1,6 @@
 # PRD: sandbox fleet site
 
-Status: accepted (#223); last checked 2026-11-26 against `7df41c1`. Design:
+Status: accepted (#223); last checked 2026-11-26 against `7c04afa`. Design:
 [README.md](./README.md). Evidence: [research.md](./research.md).
 
 ## Problem
@@ -56,7 +56,8 @@ Behind the pages, a JSON API with the same data, so scripts and the benchmark to
 
 ## Success
 
-- Fleet page freshness: a new `ate-env-api` deployment or a WorkerPool resize appears within 10 s.
+- Fleet page freshness: a new `ate-env-api` deployment or a WorkerPool resize (in its cluster's
+  WorkerPool totals) appears within 10 s.
 - Actor page: a transition appears within 10 s at the median and within 60 s at the 99th percentile
   on the Cloud Logging path, within 5 s on the OTLP path.
 - Read-only: the site's service account holds viewer roles only, verified by an IAM policy test.

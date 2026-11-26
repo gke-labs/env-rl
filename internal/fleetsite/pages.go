@@ -15,10 +15,12 @@
 package fleetsite
 
 import (
+	"cmp"
 	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -28,6 +30,9 @@ import (
 
 // maxActorRows bounds the actor rows of one Cluster page.
 const maxActorRows = 1000
+
+// maxFleetPools bounds the WorkerPool rows of one cluster on the Fleet page.
+const maxFleetPools = 10
 
 // stateOrder is the order of actor states on the pages: live, moving,
 // parked, broken.
@@ -130,12 +135,46 @@ func bar(states []stateCount, total int) []barSegment {
 	return out
 }
 
+// poolSummary is a cluster's WorkerPools on the Fleet page: the totals of
+// all of them and the first maxFleetPools rows, short pools first.
+type poolSummary struct {
+	Count, Short, More int
+	Ready, Desired     int
+	Rows               []inventory.WorkerPool
+}
+
+// summarizePools orders the pools by missing workers, most first, and keeps
+// the snapshot's order among equals, so a short pool is never cut while a
+// ready one shows.
+func summarizePools(pools []inventory.WorkerPool) poolSummary {
+	out := poolSummary{Count: len(pools)}
+	for _, p := range pools {
+		out.Ready += int(p.ReadyReplicas)
+		out.Desired += int(p.Replicas)
+		if p.ReadyReplicas < p.Replicas {
+			out.Short++
+		}
+	}
+	missing := func(p inventory.WorkerPool) int32 { return max(p.Replicas-p.ReadyReplicas, 0) }
+	rows := slices.Clone(pools)
+	slices.SortStableFunc(rows, func(a, b inventory.WorkerPool) int {
+		return cmp.Compare(missing(b), missing(a))
+	})
+	if len(rows) > maxFleetPools {
+		out.More = len(rows) - maxFleetPools
+		rows = rows[:maxFleetPools]
+	}
+	out.Rows = rows
+	return out
+}
+
 type fleetRow struct {
 	ClusterSummary
 	Age    time.Duration
 	States []stateCount
 	Total  int
 	Bar    []barSegment
+	Pools  poolSummary
 }
 
 func (s *Server) fleetPage(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +192,7 @@ func (s *Server) fleetPage(w http.ResponseWriter, r *http.Request) {
 			row.States = statesOf(c.Snapshot.Counts.ActorsByState)
 			row.Total = len(c.Snapshot.Actors)
 			row.Bar = bar(row.States, row.Total)
+			row.Pools = summarizePools(c.Snapshot.WorkerPools)
 			actors += row.Total
 			deployments += len(c.Snapshot.Deployments)
 		}

@@ -1,11 +1,11 @@
 # Execution plan: sandbox fleet site
 
-Status: accepted (#223); pull requests 1, 2, 2b, 3, 4, 5a, 5b, 2c and 7 merged (#226, #348, #349,
-#415, #416, #434, #437, #442, #443); pull request 5c, labels and service colors on the run trace, is
-in review; 6 is not started. Last checked 2026-11-26 against `7df41c1`. Design:
-[README.md](./README.md). Contracts: [interfaces.md](./interfaces.md). Done when every criterion in
-[acceptance-criteria.md](./acceptance-criteria.md) passes on two clusters in two projects and the
-pull requests below are merged.
+Status: accepted (#223); pull requests 1, 2, 2b, 3, 4, 5a, 5b, 2c, 7 and 5c merged (#226, #348,
+#349, #415, #416, #434, #437, #442, #443, #62); pull requests 4b and 4c, the Fleet page at scale and
+the Cluster page (#59, #60), are in review; 6 is not started. Last checked 2026-11-26 against
+`7c04afa`. Design: [README.md](./README.md). Contracts: [interfaces.md](./interfaces.md). Done when
+every criterion in [acceptance-criteria.md](./acceptance-criteria.md) passes on two clusters in two
+projects and the pull requests below are merged.
 
 ## Where the code lives
 
@@ -47,6 +47,7 @@ Phases 2, 3 and 4 run in parallel after phase 1.
 | 2c  | The reporter's `-enable-tracing` and `-metrics-listen-addr`, `ate_env_reporter_poll_duration_seconds{status}` with its section in `docs/metrics.md`, and a `PodMonitoring` for the reporter (FS-15)                                                                                     | small  |
 | 3   | `ate-env manifest collector` (collector Deployment, traces to Cloud Trace and the bucket) and `ate-env manifest --pod-monitoring`                                                                                                                                                       | small  |
 | 4   | `cmd/ate-env-fleet-site`: HTTP server, IAP verification, GCS and BigQuery readers, Fleet and Cluster pages, JSON API                                                                                                                                                                    | large  |
+| 4b  | the Fleet page at scale: a cluster's WorkerPool totals and at most ten rows, short pools first, and tables that keep their own height (FS-17)                                                                                                                                           | small  |
 | 5a  | Actor and Live pages, `/api/v1/live`, the PromQL proxy (`/api/v1/metrics/{name}`) with the allow-list of named queries                                                                                                                                                                  | medium |
 | 5b  | Runs page (the Cloud Trace link of a trainer run comes from the trace ids in its `spans.jsonl`; FS-11 lists how a run folder is produced with `RunReport.write`, `build_report.py` and one copy, so no trainer-side code is in scope)                                                   | medium |
 | 5c  | Run trace labels: each bar labeled with its short span name, bars colored by service with a legend, error bars hatched and marked (FS-19)                                                                                                                                               | small  |
