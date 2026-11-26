@@ -87,6 +87,9 @@ type Config struct {
 	WindowSize int
 	// Width is the most tasks in flight at once (the "500 wide").
 	Width int
+	// CreateWidth, in the step loop, bounds concurrent cold starts (creates
+	// and their first command before Step.Think); 0 means Width.
+	CreateWidth int
 	// TasksPerImage is the eval mode fan-out per image.
 	TasksPerImage int
 	// TaskOrder is the order eval mode visits (image, replay) pairs: "image"
@@ -189,6 +192,14 @@ func (c *Config) trajectoryNames() string {
 	return strings.Join(names, ",")
 }
 
+// createWidth is the most cold starts in flight at once in the step loop.
+func (c *Config) createWidth() int {
+	if c.CreateWidth > 0 {
+		return c.CreateWidth
+	}
+	return c.Width
+}
+
 // LoaderLabelKeys are the labels the loader records about its own invocation
 // on the run event: the run's shape and the settings that move its latencies
 // and failure counts. report -arm pools only reps that agree on all of them,
@@ -198,7 +209,7 @@ var LoaderLabelKeys = []string{
 	"mode", "strategy", "window_size", "width", "images", "trajectory", "tasks_per_image", "rollouts", "steps", "park",
 	"create_timeout", "step_timeout", "wake_budget", "wake_backoff",
 	"dataset", "connections", "delete_rate", "base_template", "exclude_file", "instances", "seed", "images_per_step",
-	"park_each", "placement", "task_order", "domain_width",
+	"park_each", "placement", "task_order", "domain_width", "create_width",
 }
 
 // labels describes the run for its run event.
@@ -250,6 +261,9 @@ func (c *Config) labels() map[string]string {
 		}
 		if c.ParkEach {
 			l["park_each"] = "true"
+		}
+		if c.CreateWidth > 0 {
+			l["create_width"] = strconv.Itoa(c.CreateWidth)
 		}
 	}
 	for k, v := range c.Invocation {
@@ -321,6 +335,8 @@ func (c *Config) validate() error {
 			return errors.New("park each belongs to the step loop; it cannot be combined with a strategy")
 		case c.ImagesPerStep > 0:
 			return errors.New("images per step belongs to the step loop; it cannot be combined with a strategy")
+		case c.CreateWidth > 0:
+			return errors.New("create width belongs to the step loop; it cannot be combined with a strategy")
 		case c.DomainWidth != 0:
 			return errors.New("domain width belongs to eval's loop per domain; it cannot be combined with a strategy")
 		case c.Prefetch:
@@ -360,6 +376,14 @@ func (c *Config) validate() error {
 		return errors.New("trajectory is required")
 	case c.Width < 1:
 		return errors.New("width must be >= 1")
+	case c.CreateWidth < 0:
+		return errors.New("create width must be >= 0")
+	case c.CreateWidth > c.Width:
+		return fmt.Errorf("create width %d must not exceed width %d", c.CreateWidth, c.Width)
+	case c.CreateWidth > 0 && c.Mode != ModeSteps:
+		return errors.New("create width applies to steps mode")
+	case c.CreateWidth > 0 && c.usesWorkingSet():
+		return errors.New("create width belongs to the step loop; it cannot be combined with a schedule or working-set flags")
 	}
 	for i, t := range c.Trajectories {
 		if t == nil {
@@ -540,13 +564,17 @@ type environment struct {
 	slotWaitMS    float64
 	// inWarmPool is set by a strategy run while the environment sits
 	// suspended in its warm pool; see warmPoolStats.
-	inWarmPool bool
+	inWarmPool       bool
+	releaseCreateSem func()
 }
 
 type runner struct {
 	cfg *Config
 	rec *Recorder
 	log *slog.Logger
+	// createSem bounds concurrent cold starts (creates through their first
+	// command before Step.Think) to cfg.createWidth(); nil when equal to Width.
+	createSem chan struct{}
 
 	mu       sync.Mutex
 	tasks    int
@@ -598,6 +626,9 @@ func Run(ctx context.Context, cfg Config) (*Summary, error) {
 		}
 	}
 	r := &runner{cfg: &cfg, rec: cfg.Recorder, log: cfg.Logger}
+	if cfg.Mode == ModeSteps && cfg.createWidth() < cfg.Width {
+		r.createSem = make(chan struct{}, cfg.createWidth())
+	}
 
 	if cfg.Strategy != "" || cfg.usesWorkingSet() {
 		start := time.Now()
@@ -1112,7 +1143,7 @@ func (r *runner) runWindows(ctx context.Context) {
 			r.log.Error("plan window", slog.Int("step", step), slog.String("err", err.Error()))
 			return
 		}
-		forEach(ctx, len(envs), r.cfg.Width, func(i int) { r.create(ctx, envs[i], step) })
+		forEach(ctx, len(envs), r.cfg.createWidth(), func(i int) { r.create(ctx, envs[i], step) })
 		barrier := time.Now()
 		forEach(ctx, len(envs), r.cfg.Width, func(i int) {
 			if !envs[i].failed {
@@ -1145,9 +1176,29 @@ func (r *runner) runWindows(ctx context.Context) {
 	}
 }
 
+// createGated acquires a createSem slot before create and keeps it on e
+// for replay to release after the first command, before Step.Think.
+func (r *runner) createGated(ctx context.Context, e *environment, step int) bool {
+	if r.createSem == nil {
+		return r.create(ctx, e, step)
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case r.createSem <- struct{}{}:
+	}
+	release := sync.OnceFunc(func() { <-r.createSem })
+	if !r.create(ctx, e, step) {
+		release()
+		return false
+	}
+	e.releaseCreateSem = release
+	return true
+}
+
 func (r *runner) runSteps(ctx context.Context, envs []*environment) {
 	if !r.cfg.ParkEach {
-		forEach(ctx, len(envs), r.cfg.Width, func(i int) { r.create(ctx, envs[i], 0) })
+		forEach(ctx, len(envs), r.cfg.createWidth(), func(i int) { r.create(ctx, envs[i], 0) })
 		r.log.Info("fleet created", slog.Int("environments", len(envs)), slog.Int("failed", r.countFailed(envs)))
 	}
 
@@ -1160,7 +1211,7 @@ func (r *runner) runSteps(ctx context.Context, envs []*environment) {
 			continue
 		}
 		if step > 1 && r.cfg.Park == ParkDelete {
-			forEach(ctx, len(envs), r.cfg.Width, func(i int) {
+			forEach(ctx, len(envs), r.cfg.createWidth(), func(i int) {
 				if !envs[i].failed {
 					r.create(ctx, envs[i], step)
 				}
@@ -1241,15 +1292,19 @@ func (r *runner) stepParkEach(ctx context.Context, envs []*environment, step int
 			return
 		}
 		if step == 1 {
-			if !r.create(ctx, e, 0) {
+			if !r.createGated(ctx, e, 0) {
 				return
 			}
 		} else if r.cfg.Park == ParkDelete {
-			if !r.create(ctx, e, step) {
+			if !r.createGated(ctx, e, step) {
 				return
 			}
 		}
 		r.replay(ctx, e, step)
+		if e.releaseCreateSem != nil {
+			e.releaseCreateSem()
+			e.releaseCreateSem = nil
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -1603,6 +1658,12 @@ func (r *runner) create(ctx context.Context, e *environment, step int) bool {
 // environment (its first step, or any step after a delete park) runs the
 // Setup steps first; one that survived a park runs the Reset steps first.
 func (r *runner) replay(ctx context.Context, e *environment, step int) {
+	defer func() {
+		if e.releaseCreateSem != nil {
+			e.releaseCreateSem()
+			e.releaseCreateSem = nil
+		}
+	}()
 	fresh := step <= 1 || r.cfg.Park == ParkDelete
 	if e.hasWSOverride {
 		fresh = e.wsFresh
@@ -1645,6 +1706,17 @@ func (r *runner) replay(ctx context.Context, e *environment, step int) {
 			case <-time.After(time.Duration(s.Think)):
 			}
 			totalThinkMS += ms(time.Since(thinkStart))
+			if !ok {
+				break
+			}
+		}
+		if first && fresh && r.createSem != nil && e.releaseCreateSem == nil {
+			select {
+			case <-ctx.Done():
+				ok = false
+			case r.createSem <- struct{}{}:
+				e.releaseCreateSem = sync.OnceFunc(func() { <-r.createSem })
+			}
 			if !ok {
 				break
 			}
@@ -1693,6 +1765,10 @@ func (r *runner) replay(ctx context.Context, e *environment, step int) {
 				r.rec.Record(fe)
 			}
 			first = false
+			if e.releaseCreateSem != nil {
+				e.releaseCreateSem()
+				e.releaseCreateSem = nil
+			}
 		}
 		ev := r.event(EventStep, e, step, dur, err)
 		ev.Name = s.Name

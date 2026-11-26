@@ -2301,3 +2301,52 @@ func TestPreflightVerdict(t *testing.T) {
 		}
 	}
 }
+
+// SL-6: runCmd refuses -create-width with -strategy (including -create-width 0)
+// and outside steps mode, while accepting valid -mode steps invocations.
+func TestRunCmdCreateWidthFlags(t *testing.T) {
+	const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "cmd.jsonl")
+	row := `{"kind":"command","instance_id":"c1","image":"reg/cmd@` + digest + `","command":"true"}` + "\n"
+	if err := os.WriteFile(manifest, []byte(row), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "strategy with positive create-width",
+			args:    []string{"-dataset", manifest, "-strategy", "none", "-create-width", "2", "-dry-run"},
+			wantErr: "-create-width belongs to the step loop",
+		},
+		{
+			name:    "strategy with zero create-width",
+			args:    []string{"-dataset", manifest, "-strategy", "none", "-create-width", "0", "-dry-run"},
+			wantErr: "-create-width belongs to the step loop",
+		},
+		{
+			name:    "eval mode with create-width",
+			args:    []string{"-dataset", manifest, "-mode", "eval", "-width", "4", "-create-width", "2", "-dry-run"},
+			wantErr: "steps mode",
+		},
+		{
+			name:    "valid steps mode dry-run",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-width", "4", "-create-width", "2", "-dry-run"},
+			wantErr: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runCmd(tc.args)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("runCmd(%v) = %v, want nil", tc.args, err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("runCmd(%v) = %v, want error containing %q", tc.args, err, tc.wantErr)
+			}
+		})
+	}
+}
