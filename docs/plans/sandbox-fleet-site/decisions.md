@@ -403,3 +403,9 @@ Append-only. Each entry: date, who, what, why.
   "Audit of main, 2026-11-26, for pull request 4b"). The seven steps hold.
 - 2026-11-26, pull request 4c: drift check against `main` at `9181b67` (research.md, "Audit of main,
   2026-11-26, for pull request 4c"). The seven steps hold.
+- 2026-11-26, review of pull request 4c: a filter menu showed "any" when the query named a value the
+  snapshot lacks, such as `?golden=failed` after the failure cleared or the pool of draining workers
+  whose WorkerPool object is gone, while the list stayed filtered. The menu now adds the active
+  value, selected and in order, so it shows and can be cleared. The value counts toward the bound of
+  200: 200 values and an absent active one make a text box that keeps the value. The pool menu also
+  names `namespace/pool` of each worker.

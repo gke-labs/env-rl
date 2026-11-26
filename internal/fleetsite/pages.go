@@ -249,8 +249,9 @@ func list[T any](items []T, keep func(T) bool) listed[T] {
 
 func all[T any](T) bool { return true }
 
-// filterField is one filter of a Cluster page form: a menu of its Options, or
-// a text box when there are none or more than maxRows of them.
+// filterField is one filter of a Cluster page form: a menu of its Options and
+// the active value, or a text box when there are no options or more than
+// maxRows of them.
 type filterField struct {
 	Name, Label, Value string
 	Options            []string
@@ -278,6 +279,13 @@ func (q clusterQuery) form(section string, fields ...filterField) filterForm {
 	for _, fd := range fields {
 		own[fd.Name] = true
 		fd.Value = q.get(fd.Name)
+		// An active filter whose value the snapshot no longer has (a
+		// failure that cleared, a deleted WorkerPool) stays selected, so it
+		// shows and can be cleared. It counts toward the menu bound.
+		if fd.Value != "" && len(fd.Options) > 0 && !slices.Contains(fd.Options, fd.Value) {
+			fd.Options = append(slices.Clone(fd.Options), fd.Value)
+			sort.Strings(fd.Options)
+		}
 		if len(fd.Options) > maxRows {
 			fd.Options = nil
 		}
@@ -474,6 +482,12 @@ func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request) {
 	data["WorkerForm"] = q.form("workers", filterField{Name: "pool", Label: "WorkerPool", Options: distinct(func(y func(string)) {
 		for _, p := range snap.WorkerPools {
 			y(p.Namespace + "/" + p.Name)
+		}
+		// Workers can outlive their WorkerPool object while they drain.
+		for _, wk := range snap.Workers {
+			if wk.Namespace != "" && wk.Pool != "" {
+				y(wk.Namespace + "/" + wk.Pool)
+			}
 		}
 	})})
 	data["Actors"] = list(snap.Actors, q.matchActor)

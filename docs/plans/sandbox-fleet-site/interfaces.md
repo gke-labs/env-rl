@@ -304,9 +304,10 @@ many match. It summarizes templates by base template (a derived template's `base
 name, in every atespace) with counts by `golden_state`, the 200 largest first. A base template's
 name links to `?base=`, and each golden count to `?base=&golden=`; a template without a golden state
 counts in its base's total only. A filter menu with more than 200 values is a text box for an exact
-value. Each form carries the other sections' filters as hidden fields.
-`GET /api/v1/clusters/{project}/{cluster}` is not bounded: it returns the whole snapshot, as the
-snapshot read cap of 128 MiB allows.
+value. An active filter whose value the snapshot lacks is added to its menu, selected, and counts
+toward the 200. The pool menu names the pools of the WorkerPools and of the workers. Each form
+carries the other sections' filters as hidden fields. `GET /api/v1/clusters/{project}/{cluster}` is
+not bounded: it returns the whole snapshot, as the snapshot read cap of 128 MiB allows.
 
 Configuration, each flag with an environment variable for Cloud Run:
 

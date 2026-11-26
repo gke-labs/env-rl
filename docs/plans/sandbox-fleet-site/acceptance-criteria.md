@@ -242,6 +242,7 @@ Added by pull request 4c.
 - Command: `go test -race -run '^TestClusterPage' ./internal/fleetsite`, which runs
   `TestClusterPage`, `TestClusterPageBoundsEveryList`, `TestClusterPageFilters`,
   `TestClusterPageBoundsTemplateSummary`, `TestClusterPageMenuBound`,
+  `TestClusterPageKeepsActiveFilter`, `TestClusterPageActiveFilterMenuBound`,
   `TestClusterPageEscapesFilterValues` and `TestClusterPageNodeFilterAndRowLimit`; then open
   `/clusters/<p>/<c>` for the largest cluster in headless Chrome.
 - Expected: each list of the Cluster page (deployments, WorkerPools, workers, actors, templates,
@@ -251,9 +252,11 @@ Added by pull request 4c.
   by golden state; the 200 base templates with the most templates are listed, and each links to the
   template list filtered by `base` and `golden`. `?pool=<namespace>/<name>` filters the workers, and
   each WorkerPool links to its workers. Each form and link keeps the filters of the other sections.
-  A filter with more than 200 values is a text box instead of a menu. Snapshot text and query values
-  are escaped in links and hidden fields. For a snapshot with thousands of templates, tags and
-  workers, the page is under 1 MiB, and `GET /api/v1/clusters/<p>/<c>` still returns every row.
+  A filter with more than 200 values is a text box instead of a menu. An active filter whose value
+  the snapshot lacks stays selected in its menu and counts toward the 200, and the pool menu also
+  names the pools of workers whose WorkerPool is gone. Snapshot text and query values are escaped in
+  links and hidden fields. For a snapshot with thousands of templates, tags and workers, the page is
+  under 1 MiB, and `GET /api/v1/clusters/<p>/<c>` still returns every row.
 - Pass rule: the named tests pass in the Go CI job, and the page of the largest cluster loads in
   headless Chrome in under 1 s.
 

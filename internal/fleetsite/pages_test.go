@@ -287,3 +287,72 @@ func TestClusterPageMenuBound(t *testing.T) {
 		}
 	}
 }
+
+// FS-18: an active filter whose value the snapshot does not have stays
+// selected in its menu, so it shows and can be cleared; the pool menu also
+// names the pools of workers whose WorkerPool object is gone.
+func TestClusterPageKeepsActiveFilter(t *testing.T) {
+	ts := newTestSite(t)
+	snap := scaledSnapshot(t, "k", 3, 6, 6, 0)
+	gone := snap.Workers[0]
+	gone.Name, gone.Pool = "worker-gone", "gone-pool"
+	snap.Workers = append(snap.Workers, gone)
+
+	_, body := ts.getAfterWrite(t, snap, "/clusters/proj-a/k?golden=pending&state=crashed")
+	for _, want := range []string{
+		// In order among the snapshot's own values.
+		`<option value="none">none</option><option value="pending" selected>pending</option><option value="ready">ready</option>`,
+		`<option value="crashed" selected>crashed</option>`,
+		"9 in the snapshot, 0 match.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the page lacks %q", want)
+		}
+	}
+
+	_, body = ts.get(t, "/clusters/proj-a/k?pool=ate-env/gone-pool")
+	for _, want := range []string{
+		`<option value="ate-env/gone-pool" selected>ate-env/gone-pool</option>`,
+		`<td class="mono">worker-gone</td>`,
+		"7 in the snapshot, 1 match.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the page lacks %q", want)
+		}
+	}
+	if strings.Count(body, `<option value="ate-env/gone-pool"`) != 1 {
+		t.Error("the deleted pool is not in the menu exactly once")
+	}
+
+	// Without a filter the menu still names the deleted pool.
+	_, body = ts.get(t, "/clusters/proj-a/k")
+	if !strings.Contains(body, `<option value="ate-env/gone-pool">ate-env/gone-pool</option>`) {
+		t.Error("the pool menu lacks the pool of a worker whose WorkerPool is gone")
+	}
+
+	// A filter with no values in the snapshot stays a text box.
+	for i := range snap.Actors {
+		snap.Actors[i].Template = ""
+	}
+	_, body = ts.getAfterWrite(t, snap, "/clusters/proj-a/k?template=old")
+	if !strings.Contains(body, `<input name="template" value="old" placeholder="exact value">`) {
+		t.Error("a filter without values in the snapshot is not a text box")
+	}
+}
+
+// FS-18: the active value counts toward the menu bound: maxRows-1 options and
+// an absent value give a menu of maxRows, maxRows options and an absent value
+// a text box that keeps the value.
+func TestClusterPageActiveFilterMenuBound(t *testing.T) {
+	ts := newTestSite(t)
+	for pools, menu := range map[int]bool{maxRows - 1: true, maxRows: false} {
+		snap := scaledSnapshot(t, fmt.Sprintf("a%d", pools), pools, 1, 3, 0)
+		_, body := ts.getAfterWrite(t, snap, fmt.Sprintf("/clusters/proj-a/a%d?pool=ate-env/absent", pools))
+		if got := strings.Contains(body, `<option value="ate-env/absent" selected>`); got != menu {
+			t.Errorf("%d pools: menu with the absent pool %v, want %v", pools, got, menu)
+		}
+		if !menu && !strings.Contains(body, `<input name="pool" value="ate-env/absent" placeholder="exact value">`) {
+			t.Errorf("%d pools: the text box does not keep the absent pool", pools)
+		}
+	}
+}
