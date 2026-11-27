@@ -100,6 +100,7 @@ LOADER_LABEL_KEYS = frozenset({
     "task_order",
     "domain_width",
     "create_width",
+    "adopt",
 })
 
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")

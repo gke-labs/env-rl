@@ -192,6 +192,14 @@ type Backend interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// Adopter is an optional interface for a Backend that can return a Sandbox for
+// an environment that already exists, so a step-loop run can start on the
+// parked fleet a previous run left behind with -keep. Adopt returns a NotFound
+// error when there is no such environment.
+type Adopter interface {
+	Adopt(ctx context.Context, id string) (Sandbox, error)
+}
+
 // EnvBackendOption configures an EnvBackend.
 type EnvBackendOption func(*EnvBackend)
 
@@ -479,6 +487,15 @@ func (b *EnvBackend) CreateWith(ctx context.Context, id, image string, opts Crea
 		return nil, fmt.Errorf("create %s: %w", id, err)
 	}
 	return envSandbox{e: e, deletes: b.deletes}, nil
+}
+
+// Adopt implements Adopter. It checks that the environment exists via
+// GetEnvironment and returns a handle carrying the backend's delete limits.
+func (b *EnvBackend) Adopt(ctx context.Context, id string) (Sandbox, error) {
+	if _, err := b.client.Get(ctx, b.atespace, id); err != nil {
+		return nil, fmt.Errorf("get %s: %w", id, err)
+	}
+	return envSandbox{e: b.client.Env(b.atespace, id), deletes: b.deletes}, nil
 }
 
 // WarmImage implements ImageWarmer over ate-env-api's WarmImage, with the

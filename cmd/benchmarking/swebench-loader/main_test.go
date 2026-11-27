@@ -2350,3 +2350,90 @@ func TestRunCmdCreateWidthFlags(t *testing.T) {
 		})
 	}
 }
+
+// SL-9: runCmd refuses -adopt with -strategy, outside steps mode, with a
+// non-suspend park, on non-ate-env-api drivers before -dry-run, and when the
+// runtime Backend lacks Adopter.
+func TestRunCmdAdoptFlags(t *testing.T) {
+	const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "cmd.jsonl")
+	row := `{"kind":"command","instance_id":"c1","image":"reg/cmd@` + digest + `","command":"true"}` + "\n"
+	if err := os.WriteFile(manifest, []byte(row), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "with strategy none",
+			args:    []string{"-dataset", manifest, "-strategy", "none", "-adopt", "-dry-run"},
+			wantErr: "-adopt belongs to the step loop",
+		},
+		{
+			name:    "with strategy naive in steps mode",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-strategy", "naive", "-adopt", "-dry-run"},
+			wantErr: "-adopt belongs to the step loop",
+		},
+		{
+			name:    "agent-sandbox driver dry-run",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-adopt", "-backend", "agent-sandbox", "-access", "sdk", "-dry-run"},
+			wantErr: "-adopt needs the ate-env API backend",
+		},
+		{
+			name:    "substrate direct driver dry-run",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-adopt", "-backend", "substrate", "-access", "direct", "-dry-run"},
+			wantErr: "-adopt needs the ate-env API backend",
+		},
+		{
+			name:    "substrate sdk driver dry-run",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-adopt", "-backend", "substrate", "-access", "sdk", "-dry-run"},
+			wantErr: "-adopt needs the ate-env API backend",
+		},
+		{
+			name:    "delete park dry-run",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "delete", "-adopt", "-dry-run"},
+			wantErr: "suspend",
+		},
+		{
+			name:    "valid ate-env-api dry-run",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-adopt", "-dry-run"},
+			wantErr: "",
+		},
+		{
+			name:    "valid ate-env-api park-each dry-run",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-park-each", "-adopt", "-dry-run"},
+			wantErr: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runCmd(tc.args)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("runCmd(%v) = %v, want nil", tc.args, err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("runCmd(%v) = %v, want error containing %q", tc.args, err, tc.wantErr)
+			}
+		})
+	}
+
+	// e2eFakeBackend does not implement swebench.Adopter, so a non-dry-run
+	// invocation must fail before creating environments or writing a run event.
+	testBackendOverride = e2eFakeBackend{}
+	t.Cleanup(func() { testBackendOverride = nil })
+	eventsOut := filepath.Join(dir, "adopt-non-adopter.jsonl")
+	err := runCmd([]string{
+		"-dataset", manifest,
+		"-mode", "steps",
+		"-park", "suspend",
+		"-adopt",
+		"-run-id", "adopt-check",
+		"-out", eventsOut,
+	})
+	if err == nil || !strings.Contains(err.Error(), "Adopter") {
+		t.Fatalf("runCmd with non-Adopter backend = %v, want Adopter error", err)
+	}
+}

@@ -109,6 +109,19 @@ func ValidatePlacementDriver(backend, access string, hasPlacement bool) error {
 	return nil
 }
 
+// ValidateAdoptDriver refuses -adopt on any driver other than the ate-env API
+// over Substrate: only EnvBackend implements Adopter. Backend and access
+// default to that driver when empty.
+func ValidateAdoptDriver(backend, access string, adopt bool) error {
+	if !adopt {
+		return nil
+	}
+	if (backend != "" && backend != "substrate") || (access != "" && access != "ate-env-api") {
+		return fmt.Errorf("-adopt needs the ate-env API backend (-backend substrate -access ate-env-api); %s/%s cannot adopt environments", backend, access)
+	}
+	return nil
+}
+
 // NewBackendDriver constructs the requested Backend implementation and an
 // io.Closer for releasing its underlying connections.
 func NewBackendDriver(opts BackendDriverOptions) (Backend, io.Closer, error) {

@@ -164,6 +164,9 @@ type Config struct {
 	WakeBackoff time.Duration
 	// Keep leaves the environments in place when the run ends.
 	Keep bool
+	// Adopt starts a step-loop run on the parked environments an earlier run
+	// of the same RunID left behind with Keep.
+	Adopt bool
 	// Labels are the operator's labels for the run event: the Substrate
 	// commit, the cluster, the arm. A key the loader records itself
 	// (LoaderLabelKeys, or the set. prefix) is refused by validate, so the
@@ -209,7 +212,7 @@ var LoaderLabelKeys = []string{
 	"mode", "strategy", "window_size", "width", "images", "trajectory", "tasks_per_image", "rollouts", "steps", "park",
 	"create_timeout", "step_timeout", "wake_budget", "wake_backoff",
 	"dataset", "connections", "delete_rate", "base_template", "exclude_file", "instances", "seed", "images_per_step",
-	"park_each", "placement", "task_order", "domain_width", "create_width",
+	"park_each", "placement", "task_order", "domain_width", "create_width", "adopt",
 }
 
 // labels describes the run for its run event.
@@ -264,6 +267,9 @@ func (c *Config) labels() map[string]string {
 		}
 		if c.CreateWidth > 0 {
 			l["create_width"] = strconv.Itoa(c.CreateWidth)
+		}
+		if c.Adopt {
+			l["adopt"] = "true"
 		}
 	}
 	for k, v := range c.Invocation {
@@ -337,6 +343,8 @@ func (c *Config) validate() error {
 			return errors.New("images per step belongs to the step loop; it cannot be combined with a strategy")
 		case c.CreateWidth > 0:
 			return errors.New("create width belongs to the step loop; it cannot be combined with a strategy")
+		case c.Adopt:
+			return errors.New("adopt belongs to the step loop; it cannot be combined with a strategy")
 		case c.DomainWidth != 0:
 			return errors.New("domain width belongs to eval's loop per domain; it cannot be combined with a strategy")
 		case c.Prefetch:
@@ -452,6 +460,20 @@ func (c *Config) validate() error {
 	if c.ParkEach && c.Mode != ModeSteps {
 		return errors.New("park each applies to steps mode")
 	}
+	if c.Adopt {
+		switch {
+		case c.Mode != ModeSteps:
+			return errors.New("adopt applies to steps mode")
+		case c.usesWorkingSet():
+			return errors.New("adopt belongs to the step loop; it cannot be combined with a schedule or working-set flags")
+		case c.ImagesPerStep > 0:
+			return errors.New("adopt keeps one fleet across the steps; it cannot be combined with images per step")
+		case c.Park != ParkSuspend && c.Park != ParkSuspendSync && c.Park != ParkSuspendAsync:
+			return errors.New("adopt needs park mode suspend, suspend-sync or suspend-async")
+		case !implementsAdopter(c.Backend):
+			return errors.New("adopt needs a backend that implements Adopter")
+		}
+	}
 	if c.DomainWidth != 0 && c.Mode != ModeEval {
 		return errors.New("domain width applies to eval mode")
 	}
@@ -555,6 +577,8 @@ type environment struct {
 
 	sb          Sandbox
 	createStart time.Time
+	// adopted marks an environment opened via Adopter.Adopt on step 1.
+	adopted bool
 	// failed environments are skipped for the rest of a steps run.
 	failed bool
 
@@ -602,8 +626,17 @@ func (noBackend) Create(context.Context, string, string) (Sandbox, error) {
 	return nil, errors.New("no backend: validate only")
 }
 
+func (noBackend) Adopt(context.Context, string) (Sandbox, error) {
+	return nil, errors.New("no backend: validate only")
+}
+
 func (noBackend) Delete(context.Context, string) error {
 	return errors.New("no backend: validate only")
+}
+
+func implementsAdopter(b Backend) bool {
+	_, ok := b.(Adopter)
+	return ok
 }
 
 // Run executes the configured workload and returns its summary. A non-nil
@@ -1176,11 +1209,21 @@ func (r *runner) runWindows(ctx context.Context) {
 	}
 }
 
-// createGated acquires a createSem slot before create and keeps it on e
-// for replay to release after the first command, before Step.Think.
+// createGated acquires a createSem slot before a fresh create and keeps it on e
+// for replay to release after the first command, before Step.Think. Under
+// -adopt on step 1, existing environments skip createSem so wakes run at Width.
 func (r *runner) createGated(ctx context.Context, e *environment, step int) bool {
+	if r.cfg.Adopt && step <= 1 {
+		adopted, ok := r.tryAdopt(ctx, e, step)
+		if !ok {
+			return false
+		}
+		if adopted {
+			return true
+		}
+	}
 	if r.createSem == nil {
-		return r.create(ctx, e, step)
+		return r.createFresh(ctx, e, step)
 	}
 	select {
 	case <-ctx.Done():
@@ -1188,7 +1231,7 @@ func (r *runner) createGated(ctx context.Context, e *environment, step int) bool
 	case r.createSem <- struct{}{}:
 	}
 	release := sync.OnceFunc(func() { <-r.createSem })
-	if !r.create(ctx, e, step) {
+	if !r.createFresh(ctx, e, step) {
 		release()
 		return false
 	}
@@ -1198,7 +1241,11 @@ func (r *runner) createGated(ctx context.Context, e *environment, step int) bool
 
 func (r *runner) runSteps(ctx context.Context, envs []*environment) {
 	if !r.cfg.ParkEach {
-		forEach(ctx, len(envs), r.cfg.createWidth(), func(i int) { r.create(ctx, envs[i], 0) })
+		if r.cfg.Adopt {
+			forEach(ctx, len(envs), r.cfg.Width, func(i int) { r.adoptOrCreateBarrier(ctx, envs[i]) })
+		} else {
+			forEach(ctx, len(envs), r.cfg.createWidth(), func(i int) { r.create(ctx, envs[i], 0) })
+		}
 		r.log.Info("fleet created", slog.Int("environments", len(envs)), slog.Int("failed", r.countFailed(envs)))
 	}
 
@@ -1615,9 +1662,60 @@ func (r *runner) countFailed(envs []*environment) int {
 	return n
 }
 
+func (r *runner) tryAdopt(ctx context.Context, e *environment, step int) (adopted bool, ok bool) {
+	cctx, cancel := context.WithTimeout(ctx, r.cfg.CreateTimeout)
+	defer cancel()
+	sb, err := r.cfg.Backend.(Adopter).Adopt(cctx, e.id)
+	if err == nil {
+		e.sb = sb
+		e.adopted = true
+		return true, true
+	}
+	if !isNotFound(err) {
+		e.failed = true
+		r.rec.Record(r.event(EventTask, e, step, 0, err))
+		r.countTask(e, step, false, nil)
+		r.log.Warn("adopt failed", slog.String("env", e.id), slog.String("err", err.Error()))
+		return false, false
+	}
+	return false, true
+}
+
+func (r *runner) adoptOrCreateBarrier(ctx context.Context, e *environment) bool {
+	adopted, ok := r.tryAdopt(ctx, e, 0)
+	if !ok {
+		return false
+	}
+	if adopted {
+		return true
+	}
+	if r.createSem != nil {
+		select {
+		case <-ctx.Done():
+			return false
+		case r.createSem <- struct{}{}:
+		}
+		defer func() { <-r.createSem }()
+	}
+	return r.createFresh(ctx, e, 0)
+}
+
 // create makes the environment and records the call. It returns false and
 // marks the environment failed when the create did not succeed.
 func (r *runner) create(ctx context.Context, e *environment, step int) bool {
+	if r.cfg.Adopt && step <= 1 {
+		adopted, ok := r.tryAdopt(ctx, e, step)
+		if !ok {
+			return false
+		}
+		if adopted {
+			return true
+		}
+	}
+	return r.createFresh(ctx, e, step)
+}
+
+func (r *runner) createFresh(ctx context.Context, e *environment, step int) bool {
 	if step > 1 {
 		e.id = fmt.Sprintf("%s-s%d", e.base, step)
 	}
@@ -1668,6 +1766,9 @@ func (r *runner) replay(ctx context.Context, e *environment, step int) {
 	if e.hasWSOverride {
 		fresh = e.wsFresh
 	}
+	if e.adopted && step <= 1 {
+		fresh = false
+	}
 	prefix := e.traj.Reset
 	if fresh {
 		prefix = e.traj.Setup
@@ -1685,7 +1786,7 @@ func (r *runner) replay(ctx context.Context, e *environment, step int) {
 			firstEvent = EventWake
 			firstStart = time.Time{}
 		}
-	} else if step > 1 && r.cfg.Park != ParkDelete {
+	} else if (step > 1 || e.adopted) && r.cfg.Park != ParkDelete {
 		firstEvent = EventWake
 		firstStart = time.Time{}
 	}

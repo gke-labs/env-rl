@@ -214,6 +214,7 @@ set how many, and one paces their deletes:
 | `-tasks-per-image` | eval: actors created per image, each a full create, replay, delete |
 | `-task-order` | eval: `image` (default) runs an image's replays back to back, which with `-placement` and no `-domain-width` sends them all to one node at once; `round` runs replay k of every image before replay k+1, spreading one image's creates over the run (not with `-strategy`). With `-domain-width` the order applies in each domain's queue. An image with no more replays than domains has at most one replay in each domain, and `round` then spreads nothing for it. A `round` run records the `task_order` label |
 | `-rollouts` | steps: actors per image kept alive across the training steps |
+| `-adopt` | steps: start on the parked fleet an earlier run of the same `-run-id` left behind with `-keep` (ate-env-api only, at the step barrier or with `-park-each`). An environment that exists wakes on step 1 with `Trajectory.Reset`, and one that is missing is created. Needs a suspend park. Recorded as `adopt` |
 
 So `-images 445` is many images with one actor each, `-images 1
 -tasks-per-image 2000 -width 500` is one image with 2,000 actors 500 at a
