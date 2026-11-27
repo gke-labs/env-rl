@@ -66,6 +66,8 @@ type Server struct {
 	// (see egresspolicy.go). egressSeq numbers them, for their uids.
 	egressPolicies map[string]*ateapipb.EgressPolicy
 	egressSeq      int
+	// egressCalls counts the egress policy calls (EgressPolicyCalls).
+	egressCalls int
 	// actorSeq numbers the actors CreateActor accepted, for their uids.
 	actorSeq int
 	// lastTemplateCreateMD is the incoming metadata of the last
@@ -114,6 +116,11 @@ type Server struct {
 	// OnListWorkers, when set, runs at the start of each ListWorkers call,
 	// without the server's lock. Set it before the calls start.
 	OnListWorkers func()
+	// OnCreateEgressPolicy, when set, runs at the start of each
+	// CreateActorEgressPolicy call with the call's context, without the
+	// server's lock. An error it returns fails the call before anything is
+	// stored. Set it before the calls start.
+	OnCreateEgressPolicy func(ctx context.Context) error
 	// BornSuspended makes CreateActor leave a new actor SUSPENDED and
 	// unplaced, as Substrate does: only ResumeActor (the router's wake on a
 	// guest call, or a direct resume) places it on a worker and runs it. Off,

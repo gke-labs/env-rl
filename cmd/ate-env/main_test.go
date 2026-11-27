@@ -387,7 +387,7 @@ func TestServerInfoCommand(t *testing.T) {
 		"server: sandboxenv-rl\n",
 		"version: v9.9.9\n",
 		"substrate_version: ",
-		"features: rootfs_image, pty, suspend_mode, image_status, placement_domains, warm_image, port_proxy\n",
+		"features: rootfs_image, pty, suspend_mode, image_status, placement_domains, warm_image, egress_policy, port_proxy\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("server-info output missing %q:\n%s", want, out.String())
@@ -425,7 +425,7 @@ func TestServerInfoCommandJSON(t *testing.T) {
 		t.Fatalf("output is not one JSON object: %v\n%s", err, out.String())
 	}
 	if got.Server != "sandboxenv-rl" || got.Version != "v9.9.9" || got.SubstrateVersion == "" ||
-		strings.Join(got.Features, ",") != "rootfs_image,pty,suspend_mode,image_status,placement_domains,warm_image,port_proxy" {
+		strings.Join(got.Features, ",") != "rootfs_image,pty,suspend_mode,image_status,placement_domains,warm_image,egress_policy,port_proxy" {
 		t.Errorf("server-info --json = %+v", got)
 	}
 }

@@ -6,6 +6,16 @@ user needs to know across them.
 
 ## Unreleased
 
+### Added
+- `CreateEnvironment` takes an optional `egress_policy` and writes it as the
+  actor's Substrate egress policy before `CreateEnvironment` returns, while the actor is suspended. Each rule
+  allows `http`, `https` (intercepted: the task image must trust the egress
+  gateway CA) or `tls_passthrough` to hostnames and ports, and a policy with
+  no rules denies all egress. A rule Substrate would refuse is
+  `InvalidArgument` and creates nothing. A failed write deletes the actor
+  again. `GetServerInfo` lists the feature `egress_policy`. Without the field
+  nothing changes: Substrate denies all egress. The Go and Python SDKs follow.
+
 ### Changed
 - `ate-env-fleet-site`: the Run page's trace waterfall labels each bar with
   its span name (the method of an RPC name), inside the bar or next to it, so

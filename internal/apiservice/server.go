@@ -218,6 +218,11 @@ func (s *Server) isRouterClosed() bool {
 // the base template does not exist in the atespace, when the derived name
 // is already held by a template running a different image, or for a
 // time_to_live on a server that runs without the store (nothing is created).
+// InvalidArgument for an egress_policy that Substrate would refuse (nothing
+// is created). When the egress policy is not written, the code of that
+// write, after the environment was deleted again; Internal when the delete
+// fails too, or when the control plane returned the actor with no uid, and
+// the environment then exists with no policy.
 // Unavailable when the deadline was not written and the environment was
 // deleted again. DeadlineExceeded
 // or Canceled when the request ends while a recreate of its derived template
@@ -234,6 +239,9 @@ func (s *Server) CreateEnvironment(ctx context.Context, req *ateenvv1alpha.Creat
 		// Never accept and drop: the caller would wait for a delete that
 		// does not come.
 		return nil, errStoreOff("time_to_live")
+	}
+	if err := checkEgressPolicy(req.GetEgressPolicy()); err != nil {
+		return nil, err
 	}
 	var start time.Time
 	if s.Metrics != nil {
@@ -286,6 +294,13 @@ func (s *Server) CreateEnvironment(ctx context.Context, req *ateenvv1alpha.Creat
 		Status:         ateenvv1alpha.EnvironmentStatus_ENVIRONMENT_STATUS_UNSPECIFIED,
 		WorkerSelector: req.GetWorkerSelector(),
 		CreateTime:     actor.GetMetadata().GetCreateTime(),
+	}
+	// The policy goes first: a failed deadline write below deletes the
+	// actor, and Substrate deletes its policy with it.
+	if p := req.GetEgressPolicy(); p != nil {
+		if err := s.writeCreateEgressPolicy(ctx, atespace, actor, p); err != nil {
+			return nil, err
+		}
 	}
 	if ttl > 0 {
 		expire, err := s.writeCreateDeadline(ctx, atespace, actor, ttl)
