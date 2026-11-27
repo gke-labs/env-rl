@@ -110,6 +110,42 @@ type Step struct {
 	// when the step exits 0 and 0 otherwise. At most one step per
 	// trajectory.
 	Reward bool `json:"reward,omitempty"`
+
+	// thinkTemplate holds an unrendered {{var ...}} duration expression from
+	// YAML until Render resolves it into Think.
+	thinkTemplate string
+}
+
+type rawThink struct {
+	dur  Duration
+	tmpl string
+}
+
+func (rt *rawThink) UnmarshalJSON(b []byte) error {
+	if s, err := strconv.Unquote(string(b)); err == nil && strings.Contains(s, "{{") {
+		rt.tmpl = s
+		return nil
+	}
+	return rt.dur.UnmarshalJSON(b)
+}
+
+// UnmarshalJSON decodes a Step while preserving DisallowUnknownFields and
+// allowing Step.Think to carry a {{var ...}} template string before Render.
+func (s *Step) UnmarshalJSON(b []byte) error {
+	type stepAlias Step
+	var aux struct {
+		stepAlias
+		Think rawThink `json:"think,omitempty"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&aux); err != nil {
+		return err
+	}
+	*s = Step(aux.stepAlias)
+	s.Think = aux.Think.dur
+	s.thinkTemplate = aux.Think.tmpl
+	return nil
 }
 
 // Trajectory is the scripted rollout replayed in every environment.
@@ -370,26 +406,42 @@ func (t *Trajectory) render(in Instance, used map[string]string) (*Trajectory, e
 		return nil, fmt.Errorf("trajectory %s instance %s: %w", t.Name, in.InstanceID, err)
 	}
 	out := &Trajectory{Name: t.Name, Vars: t.Vars}
-	funcs := templateFuncs(t.Vars, used)
-	if out.Setup, err = renderSteps(t.Name, t.Setup, data, funcs); err != nil {
+	funcs := templateFuncs(t.Vars, used, true)
+	rawFuncs := templateFuncs(t.Vars, used, false)
+	if out.Setup, err = renderSteps(t.Name, t.Setup, data, funcs, rawFuncs); err != nil {
 		return nil, err
 	}
-	if out.Reset, err = renderSteps(t.Name, t.Reset, data, funcs); err != nil {
+	if out.Reset, err = renderSteps(t.Name, t.Reset, data, funcs, rawFuncs); err != nil {
 		return nil, err
 	}
-	if out.Steps, err = renderSteps(t.Name, t.Steps, data, funcs); err != nil {
+	if out.Steps, err = renderSteps(t.Name, t.Steps, data, funcs, rawFuncs); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func renderSteps(tname string, steps []Step, data any, funcs template.FuncMap) ([]Step, error) {
+func renderSteps(tname string, steps []Step, data any, funcs, rawFuncs template.FuncMap) ([]Step, error) {
 	out := make([]Step, len(steps))
 	for i, s := range steps {
 		r := s
 		var err error
 		if r.Run, err = renderText(s.Run, data, funcs); err != nil {
 			return nil, fmt.Errorf("trajectory %s step %s run: %w", tname, s.Name, err)
+		}
+		if s.thinkTemplate != "" {
+			raw, err := renderText(s.thinkTemplate, data, rawFuncs)
+			if err != nil {
+				return nil, fmt.Errorf("trajectory %s step %s think: %w", tname, s.Name, err)
+			}
+			d, err := time.ParseDuration(raw)
+			if err != nil {
+				return nil, fmt.Errorf("trajectory %s step %s think %q: %w", tname, s.Name, raw, err)
+			}
+			if d < 0 {
+				return nil, fmt.Errorf("trajectory %s step %s: think cannot be negative", tname, s.Name)
+			}
+			r.Think = Duration(d)
+			r.thinkTemplate = ""
 		}
 		if s.Write != nil {
 			w := *s.Write
@@ -409,11 +461,11 @@ func renderSteps(tname string, steps []Step, data any, funcs template.FuncMap) (
 // renders a value as JSON, for handing an instance's fields to a script in
 // the sandbox. var reads an operator value (-set KEY=VALUE): the value when
 // set, else the default given as the second argument, else an error, so a
-// workload names its knobs and their defaults in one place. The value comes
-// back as one single-quoted shell word, so a step writes {{var "X"}} bare and
-// a value with quotes or spaces cannot change the command. used, when not
-// nil, collects the value each name resolved to.
-func templateFuncs(vars map[string]string, used map[string]string) template.FuncMap {
+// workload names its knobs and their defaults in one place. When quoteShell is
+// true, the value comes back as one single-quoted shell word, so a step writes
+// {{var "X"}} bare and a value with quotes or spaces cannot change the
+// command. used, when non-nil, collects the value each name resolved to.
+func templateFuncs(vars map[string]string, used map[string]string, quoteShell bool) template.FuncMap {
 	return template.FuncMap{
 		"json": func(v any) (string, error) {
 			b, err := json.Marshal(v)
@@ -432,6 +484,9 @@ func templateFuncs(vars map[string]string, used map[string]string) template.Func
 			}
 			if used != nil {
 				used[name] = v
+			}
+			if !quoteShell {
+				return v, nil
 			}
 			return shellQuote(v), nil
 		},

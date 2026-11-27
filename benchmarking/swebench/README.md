@@ -585,16 +585,18 @@ task rate at that many tasks per second once starts are warm; raise it for a
 throughput run. The events file lives in the pod until the copy at the end, so
 a shard that loses its pod loses its events.
 
-## Image-delivery workloads
+## Image-delivery and think-time workloads
 
-Three built-in trajectories exercise image delivery rather than SWE-bench
-grading, for comparing conventional pull, image streaming and other loaders:
-`workload-file-read` (read a sample of files), `workload-compile`
-(byte-compile every Python file, which reads each one and writes next to it)
-and `workload-read-all` (read every file, the worst case for lazy loading).
-Each starts with a `probe` step that runs `true`, so `ttfic` is the cold start
-alone and the workload's own time is its own `step` row. They need no grading
-material, so the manifest can be image-only:
+Five built-in trajectories run without SWE-bench grading, for comparing
+conventional pull, image streaming, lazy loading and active RL step density:
+`workload-file-read-one` (read one file), `workload-file-read` (read a sample
+of matching files), `workload-compile` (byte-compile every Python file, which
+reads each one and writes next to it), `workload-read-all` (read every file,
+the worst case for lazy loading) and `workload-rl-think` (hold each environment
+awake across simulated policy think time). Each starts with a `probe` step that
+runs `true`, so `ttfic` is the cold start alone and the workload's own time is
+its own `step` row. They need no grading material, so the manifest can be
+image-only:
 
 ```bash
 benchmarking/swebench/make-dataset.py --images-file images.txt --out images.jsonl
@@ -603,16 +605,19 @@ swebench-loader run -dataset images.jsonl -trajectory workload-read-all -images 
 
 The workloads take their knobs from `run -set KEY=VALUE`, through the
 trajectories' `var` function, and each file states its defaults, which fit a
-SWE-bench image. A value lands in the command as one quoted shell word. Each
-`-set` is recorded as a `set.KEY` label, which the reps of an arm must agree
-on, and a key that no trajectory reads is an error:
+SWE-bench image. A value read in `run` lands in the command as one quoted shell
+word, while a value read in `think` (`THINK` on `workload-rl-think`) resolves
+unquoted as a Go duration on `Step.Think`. Each `-set` is recorded as a
+`set.KEY` label, which the reps of an arm must agree on, and a key that no
+trajectory reads is an error:
 
-| Workload | Knobs | Default | What it reads |
+| Workload | Knobs | Default | What it does |
 |---|---|---|---|
-| `workload-file-read-one` | `READ_FILE` | `/testbed/.git/HEAD` (tiny; set a real file to measure a read) | one file |
-| `workload-file-read` | `READ_ROOT`, `READ_FILES` | `/`, `200` | a sample of Python files |
-| `workload-compile` | `PYTHON`, `COMPILE_DIR` | `python3`, `/testbed` | every Python file under the directory, compiled with the image's own Python |
-| `workload-read-all` | `READ_ROOT` | `/` | every regular file, the worst case for lazy loading |
+| `workload-file-read-one` | `READ_FILE` | `/testbed/.git/HEAD` (tiny; set a real file to measure a read) | reads one file |
+| `workload-file-read` | `READ_ROOT`, `READ_FILES`, `READ_GLOB` | `/`, `200`, `*.py` | reads a sample of matching files (`-set READ_GLOB=*` for polyglot sets, `-set READ_ROOT=/testbed` to stay in the checkout) |
+| `workload-compile` | `PYTHON`, `COMPILE_DIR` | `python3`, `/testbed` | compiles every Python file under the directory with the image's own Python |
+| `workload-read-all` | `READ_ROOT` | `/` | reads every regular file, the worst case for lazy loading |
+| `workload-rl-think` | `THINK` | `10s` | holds each sandbox awake across simulated policy think time (`-set THINK=25s`), works on any image |
 
 The reading steps print the bytes read, which the reward step's output tail
 keeps in the events file, and fail when nothing was read or a read reported
