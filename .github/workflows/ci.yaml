@@ -46,7 +46,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # 31.11.5
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/cache-go-and-substrate
@@ -79,7 +79,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # 31.11.5
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run Python CI checks via Nix
@@ -122,7 +122,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # 31.11.5
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       # A separate scope from the Go job: ko's build flags differ, so the two
@@ -152,7 +152,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # 31.11.5
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run OpenHands tests and ruff
@@ -174,7 +174,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # 31.11.5
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run Harbor tests and ruff
@@ -196,7 +196,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # 31.11.5
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run E2B tests and ruff
@@ -219,7 +219,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # 31.11.5
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify the Dafny models against their README
@@ -247,7 +247,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # 31.11.5
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       # A separate scope from the Go job: ci-release cross-compiles with
