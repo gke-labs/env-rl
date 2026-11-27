@@ -1003,6 +1003,7 @@ func runCmd(args []string) (retErr error) {
 		strategy         = fs.String("strategy", "", "Warm-pool orchestration strategy: none, naive, sliding, or pipelined (matches Python SandboxFleet).")
 		windowSize       = fs.Int("window-size", 0, "sliding/pipelined: distinct images per warm window (0 chooses min(8, ceil(images/2))).")
 		width            = fs.Int("width", 50, "Most tasks in flight at once.")
+		createWidth      = fs.Int("create-width", 0, "steps: most environments starting cold at once (create through first command, released before Step.Think); 0 means -width.")
 		arrivalRate      = fs.Float64("arrival-rate", 0, "open-loop: Poisson task arrival rate in tasks/sec.")
 		tasksPerImage    = fs.Int("tasks-per-image", 1, "eval: replays per image.")
 		taskOrder        = fs.String("task-order", "image", "eval: the order of the (image, replay) pairs. image runs an image's replays back to back (with -placement and no -domain-width they all land on one node at once); round runs replay k of every image before replay k+1, which spreads one image's creates over the run (not with -strategy). With -domain-width the order applies in each domain's queue.")
@@ -1077,7 +1078,7 @@ func runCmd(args []string) (retErr error) {
 		// A strategy owns the lifecycle: it parks by suspend (delete for
 		// none) and runs one pass. The step loop's flags would be recorded
 		// as labels of a run that never acted on them, so they are refused.
-		for _, name := range []string{"park", "step-pause", "park-each", "images-per-step", "prefetch", "schedule"} {
+		for _, name := range []string{"park", "step-pause", "park-each", "images-per-step", "create-width", "prefetch", "schedule"} {
 			if visited[name] {
 				return fmt.Errorf("-%s belongs to the step loop; -strategy %s parks by %s and runs one pass (omit -%s)",
 					name, *strategy, strategyPark(swebench.Strategy(*strategy)), name)
@@ -1269,6 +1270,7 @@ func runCmd(args []string) (retErr error) {
 		Strategy:      swebench.Strategy(*strategy),
 		WindowSize:    *windowSize,
 		Width:         *width,
+		CreateWidth:   *createWidth,
 		ArrivalRate:   *arrivalRate,
 		TasksPerImage: *tasksPerImage,
 		TaskOrder:     *taskOrder,
