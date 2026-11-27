@@ -1,10 +1,10 @@
 # Plan: E2B runtime support
 
-Status: the design after the review of 2026-11-13, checked on 2026-11-13 against `main` at
-`891160ac`. This plan is merged (#326); no implementation is. Pull requests 0, 1 and 2 are open and
-have this design: #363 at `d6a657dd`, #364 at `e266fcbb` and #365 at `f4260135`. The core pull
-request for the wake hold is #384 at `885f8490` (issue #382). Checked against `e2b` 2.63.0 (PyPI)
-and envd 0.10.2 (`e2b-dev/runtime`, `packages/envd`). The criteria are in
+Status: the design after the review of 2026-11-13; statuses checked on 2026-11-16 against `main` at
+`a12f48a0`. The series is merged: #363 (the capability flag), #364 (the envd layer), #365 (the
+classes), #384 (the wake hold, issue #382), #390 (the drift job) and #399 (the example
+`examples/e2b-envd-layer`). Three follow-ups are open; section 6.1 has their state. Checked against
+`e2b` 2.63.0 (PyPI) and envd 0.10.2 (`e2b-dev/runtime`, `packages/envd`). The criteria are in
 [acceptance-criteria.md](./acceptance-criteria.md).
 
 ## 1. Goal
@@ -56,7 +56,7 @@ Non-goals:
 | A credential the daemon never sees | `X-Env-Authorization`; the proxy checks and removes it, and forwards `Authorization`                               |
 | create, kill, pause, resume        | `CreateEnvironment`, `DeleteEnvironment`, `SuspendEnvironment`, wake on the next request                           |
 | Template ID to image               | A registered template by name, or `rootfs_image` on a base template (derived template)                             |
-| List, metadata                     | `ListEnvironments` lists one atespace (#392). Missing: no labels on an environment                                 |
+| List, metadata                     | `ListEnvironments` lists one atespace (#392). Missing: no labels on an environment (follow-up 2, section 6.1)      |
 | Timeout (kill after N seconds)     | Missing: no time to live (#76 covers auto-suspend only)                                                            |
 | `get_host(port)` hostname          | The port proxy's hostname form, off unless `--port-proxy-host-suffix` is set (#388); the class does not use it yet |
 | Egress rules                       | Missing: no per-environment network policy                                                                         |
@@ -220,9 +220,9 @@ images that run as root. Group V of the criteria has the results that are criter
 | 1 (#364)     | The envd layer, its template script, the Kind test of the layer                     | 0     |
 | 2 (#365)     | `ate_env_e2b.Sandbox`, `AsyncSandbox` if it stays thin, the Kind test of the class  | 1     |
 | core         | The opt-in wake hold of the port proxy: a separate core pull request, with an issue |       |
-| later        | Environment time to live: API field, enforcement, `timeout` and `set_timeout`       | 2     |
-| later        | Environment labels (`ListEnvironments` is #392): `metadata`, `Sandbox.list`         | 2     |
-| later        | Hostname form on the port proxy: `get_host`, signed file URLs                       | 2     |
+| follow-up 1  | Environment time to live: `timeout` and `set_timeout` (section 6.1)                 | 2     |
+| follow-up 2  | Environment labels and the list: `metadata`, `Sandbox.list` (section 6.1)           | 2     |
+| follow-up 3  | Hostname form on the port proxy: `get_host`, the file URLs (section 6.1)            | 2     |
 | #390         | The scheduled drift job (section 7)                                                 | 2     |
 
 The core pull request for the wake hold is #384, and its issue is #382: the header is
@@ -237,8 +237,51 @@ The core pull request for the wake hold is #384, and its issue is #382: the head
   request of its own after 2.
 - The class sends the wake-hold header from pull request 2 on; the hold works when the core pull
   request merges.
-- Each "later" item gets its own issue before work starts. The first three are useful beyond E2B.
+- Each follow-up has its own issue. The three are useful beyond E2B, thus the server part of each
+  has its plan and its criteria outside this directory (section 6.1).
 - Not in this series: the code interpreter (D-6) and an envd change for non-root images (D-9).
+
+### 6.1 Follow-ups
+
+Three parts of the E2B SDK are refused by the classes today, because ate-env had nothing behind
+them. Each follow-up has a server part, which any client can use, and a class part in
+`integrations/e2b`. State on 2026-11-16:
+
+| Follow-up                      | E2B surface                              | Issue | Criterion | Server part                                                                                                                                                                                                                                             | Class part  |
+| ------------------------------ | ---------------------------------------- | ----- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 1. Time to live                | `timeout`, `set_timeout`                 | #386  | E2B-31    | Plan [environment-metadata.md](../ate-env-api/environment-metadata.md), criteria `EM`. The store is merged (#407). Open: `time_to_live` on create, `Environment.expire_time`, `SetEnvironmentTimeToLive` and the deadline sweep (its pull request 3).   | Not started |
+| 2. Labels and the list         | `metadata`, `Sandbox.list`               | #387  | E2B-32    | `ListEnvironments` and `Environment.create_time` are merged (#392, criteria `AE-6` to `AE-10`). The store is merged (#407). Open: `labels` on create and on an environment, and the list by label selector (pull request 2 of environment-metadata.md). | Not started |
+| 3. Hostnames and the file URLs | `get_host`, `download_url`, `upload_url` | #388  | E2B-33    | The hostname form of the port proxy is merged (#393, criteria `PP-4` to `PP-13`): `--port-proxy-host-suffix`, with the caller token as its credential.                                                                                                  | Not started |
+
+What each class part does, and what it waits for:
+
+1. **Time to live.** `create(timeout=...)` and `connect(timeout=...)` set the deadline of the
+   environment, and `set_timeout` moves it, in place of today's `TimeoutNotEnforcedWarning` and
+   refusal. With the time to live on, a sandbox that names no `timeout` gets E2B's default of 300 s
+   (decision EM-H of environment-metadata.md, criterion `EM-16`); the classes read `GetServerInfo`
+   to know. With it off, the classes keep today's behaviour. `get_info` then reports a real
+   `end_at`. It waits for pull request 3 of environment-metadata.md.
+2. **Labels and the list.** `create(metadata=...)` stores the metadata as the labels of the
+   environment, `get_info` returns it, and `Sandbox.list` pages over the atespace with E2B's filters
+   by metadata and by state. `get_info` already can report a real `started_at` from
+   `Environment.create_time`; the classes still return the epoch. It waits for pull request 2 of
+   environment-metadata.md. The limits of a label there (32 labels, a key of 63 bytes, a value of
+   256 bytes) are narrower than E2B's metadata; a value outside them is refused, not cut.
+3. **Hostnames and the file URLs.** `get_host(port)` returns `<port>-<sandbox_id>.<suffix>`, or the
+   form with the atespace for an atespace that is not the default. The server part is merged, thus
+   this is the one follow-up that can start now. Two points are open:
+   - The suffix. E2B's SDK derives `api.<domain>` and `<port>-<id>.<domain>` from one `domain`. The
+     port proxy gives each name under its suffix to an environment port, thus the API cannot have a
+     name under the suffix. The class needs the suffix from a setting of its own, or from
+     `GetServerInfo`. Open decision.
+   - The credential. The hostname form takes the caller token, in a header. A browser, or a plain
+     `curl` of the URL, sends none, thus `get_host` serves a client that can add a header.
+     `download_url` and `upload_url` are signed URLs on E2B; the merged design sends envd no token,
+     thus they have no signature to carry. They stay refused until a design for a URL that carries
+     its own credential exists.
+
+Order: follow-up 3's `get_host` can start now. Follow-ups 1 and 2 follow their server pull requests,
+and one class pull request can carry both (pull request 4 of environment-metadata.md).
 
 ## 7. Drift check for a new `e2b` release
 
