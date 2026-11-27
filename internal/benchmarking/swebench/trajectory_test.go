@@ -116,6 +116,8 @@ func TestParseTrajectoryRejects(t *testing.T) {
 		"write reward":  "name: t\nsteps:\n  - name: a\n    write: {path: /p}\n    reward: true\n",
 		"bad mode":      "name: t\nsteps:\n  - name: a\n    write: {path: /p, mode: \"zz\"}\n",
 		"bad think":     "name: t\nsteps:\n  - name: a\n    run: x\n    think: soon\n",
+		"null think":    "name: t\nsteps:\n  - name: a\n    run: x\n    think: null\n",
+		"blank think":   "name: t\nsteps:\n  - name: a\n    run: x\n    think:\n",
 		"neg think":     "name: t\nsteps:\n  - name: a\n    run: x\n    think: -1s\n",
 		"neg timeout":   "name: t\nsteps:\n  - name: a\n    run: x\n    timeout: -1m\n",
 		"unknown field": "name: t\nsteps:\n  - name: a\n    run: x\n    bogus: 1\n",
@@ -194,7 +196,7 @@ func TestGrades(t *testing.T) {
 	if !def.Grades() {
 		t.Fatal("the default trajectory grades")
 	}
-	for _, n := range []string{"workload-file-read-one", "workload-file-read", "workload-compile", "workload-read-all"} {
+	for _, n := range []string{"workload-file-read-one", "workload-file-read", "workload-compile", "workload-read-all", "workload-rl-think"} {
 		tr, err := LoadTrajectory(n)
 		if err != nil {
 			t.Fatalf("%s: %v", n, err)
@@ -425,5 +427,81 @@ steps:
 `)
 	if _, err := TrajectoryAssets(sub); err == nil || !strings.Contains(err.Error(), "plain file name") {
 		t.Fatalf("a directory in write.file must be refused: %v", err)
+	}
+}
+
+// SL-11 (docs/plans/swebench-loader/acceptance-criteria.md): workload-file-read
+// defaults READ_GLOB to *.py and overrides the find -name pattern via -set.
+func TestSL11WorkloadFileReadGlob(t *testing.T) {
+	tr, err := LoadTrajectory("workload-file-read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := Instance{InstanceID: "x", Image: "reg/img@" + goodDigest}
+	def, err := tr.Render(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(def.Steps[1].Run, "-name '*.py'") {
+		t.Fatalf("default render = %q, want -name '*.py'", def.Steps[1].Run)
+	}
+	used, err := tr.VarsUsed(in)
+	if err != nil || used["READ_GLOB"] != "*.py" {
+		t.Fatalf("VarsUsed = %v, %v, want READ_GLOB=*.py", used, err)
+	}
+
+	tr.Vars = map[string]string{"READ_ROOT": "/testbed", "READ_GLOB": "*", "READ_FILES": "50"}
+	poly, err := tr.Render(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(poly.Steps[1].Run, "find '/testbed' -xdev -type f -name '*'") {
+		t.Fatalf("polyglot render = %q", poly.Steps[1].Run)
+	}
+}
+
+// SL-12 (docs/plans/swebench-loader/acceptance-criteria.md): Step.Think
+// evaluates {{var ...}} duration expressions during Render, records VarsUsed
+// and RenderedStep.ThinkMS, rejects bad or negative durations, and powers
+// built-in workload-rl-think.
+func TestSL12StepThinkTemplateAndWorkloadRLThink(t *testing.T) {
+	tr, err := LoadTrajectory("workload-rl-think")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := Instance{InstanceID: "x", Image: "reg/img@" + goodDigest}
+	def, err := tr.Render(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Duration(def.Steps[1].Think) != 10*time.Second {
+		t.Fatalf("default think = %s, want 10s", time.Duration(def.Steps[1].Think))
+	}
+	used, err := tr.VarsUsed(in)
+	if err != nil || used["THINK"] != "10s" {
+		t.Fatalf("VarsUsed = %v, %v, want THINK=10s", used, err)
+	}
+
+	tr.Vars = map[string]string{"THINK": "25s"}
+	custom, err := tr.Render(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Duration(custom.Steps[1].Think) != 25*time.Second {
+		t.Fatalf("custom think = %s, want 25s", time.Duration(custom.Steps[1].Think))
+	}
+	plan, err := BuildRenderedPlan("ds.jsonl", "ds.jsonl", "", "", []Instance{in}, []*Trajectory{tr}, 1, 1, map[string]string{"THINK": "25s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Instances[0].Steps[1].ThinkMS; got != 25000 {
+		t.Fatalf("RenderedStep.ThinkMS = %v, want 25000", got)
+	}
+
+	for _, bad := range []string{"soon", "-5s"} {
+		tr.Vars = map[string]string{"THINK": bad}
+		if _, err := tr.Render(in); err == nil {
+			t.Errorf("THINK=%q: expected Render error, got nil", bad)
+		}
 	}
 }

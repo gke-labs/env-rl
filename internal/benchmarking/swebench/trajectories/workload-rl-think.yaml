@@ -1,0 +1,28 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# RL think-time workload: run probe first so time to first instruction or wake
+# measures cold start or resume alone, hold the sandbox awake across simulated
+# policy inference (THINK, default 10s; pass -set THINK=25s to change), then
+# run a lightweight command. Needs no grading material and runs unchanged
+# across polyglot task images.
+name: workload-rl-think
+steps:
+  - name: probe
+    run: "true"
+  - name: act
+    think: '{{var "THINK" "10s"}}'
+    run: pwd >/dev/null
+    timeout: 2m
+    reward: true
