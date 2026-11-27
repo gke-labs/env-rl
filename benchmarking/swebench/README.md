@@ -202,13 +202,15 @@ flag.
 
 ## How many actors, and on which clusters
 
-Every environment the loader creates is one Substrate actor. Four flags
-set how many, and one paces their deletes:
+Every environment the loader creates is one Substrate actor. Six flags
+set how many run or wake at once, one orders eval replays, and one paces
+deletes:
 
 | Flag | Controls |
 |---|---|
-| `-width` | actors in flight at once, and by default the cap on parallel creates |
+| `-width` | actors in flight at once, and by default the cap on parallel creates and wakes |
 | `-create-width` | steps: cap on concurrent cold starts (each create through its first command, released before `Step.Think`) when lower than `-width` (`0` uses `-width`). Lets a parked fleet pull images at `-create-width` while keeping `-width` environments awake during think time and wakes. Recorded as `create_width` |
+| `-wake-width` | steps with a suspend park: cap on concurrent wakes (each parked environment's first command on a woken step, released before `Step.Think`). `0` uses `-width`. Lets a suspended fleet restore at `-wake-width` while keeping `-width` environments awake during think time. When above `0`, the run records the `wake_width` label |
 | `-domain-width` | eval with `-placement`: actors in flight at once in each placement domain, in place of `-width`; the run has up to N times the number of domains in flight |
 | `-delete-rate` | most environment deletes per second through ate-env-api, per loader process (several loaders at once add their caps up), 200 by default; 0 removes the cap. The bucket rate-limits snapshot deletes, and a delete it refuses (429, `ResourceExhausted`) is retried with backoff for up to two minutes. The queue wait and the backoff count in the `delete` event and in the `park_s` of a `-park delete` run; the run records the cap as the `delete_rate` label |
 | `-tasks-per-image` | eval: actors created per image, each a full create, replay, delete |
