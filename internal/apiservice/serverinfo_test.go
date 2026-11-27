@@ -29,8 +29,8 @@ func TestGetServerInfoFeaturesFollowConfig(t *testing.T) {
 		info ServerInfo
 		want []string
 	}{
-		{"defaults", ServerInfo{}, []string{FeatureRootfsImage, FeaturePTY, FeatureSuspendMode, FeatureImageStatus, FeaturePlacementDomains, FeatureWarmImage}},
-		{"port proxy", ServerInfo{PortProxy: true}, []string{FeatureRootfsImage, FeaturePTY, FeatureSuspendMode, FeatureImageStatus, FeaturePlacementDomains, FeatureWarmImage, FeaturePortProxy}},
+		{"defaults", ServerInfo{}, []string{FeatureRootfsImage, FeaturePTY, FeatureSuspendMode, FeatureImageStatus, FeaturePlacementDomains, FeatureWarmImage, FeatureEgressPolicy}},
+		{"port proxy", ServerInfo{PortProxy: true}, []string{FeatureRootfsImage, FeaturePTY, FeatureSuspendMode, FeatureImageStatus, FeaturePlacementDomains, FeatureWarmImage, FeatureEgressPolicy, FeaturePortProxy}},
 	}
 	for _, tc := range cases {
 		s := New(nil, "", "")
@@ -48,6 +48,19 @@ func TestGetServerInfoFeaturesFollowConfig(t *testing.T) {
 		if resp.GetSubstrateVersion() == "" {
 			t.Errorf("%s: substrate_version is empty, want a version or \"unknown\"", tc.name)
 		}
+	}
+}
+
+// TestEG14ServerInfoListsEgressPolicy checks EG-14: GetServerInfo lists the
+// feature egress_policy, with or without the optional listeners and stores.
+func TestEG14ServerInfoListsEgressPolicy(t *testing.T) {
+	s := New(nil, "", "")
+	resp, err := s.GetServerInfo(context.Background(), &ateenvv1alpha.GetServerInfoRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(resp.GetFeatures(), "egress_policy") {
+		t.Errorf("features = %v, want egress_policy listed", resp.GetFeatures())
 	}
 }
 

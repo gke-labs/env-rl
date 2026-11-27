@@ -43,7 +43,23 @@ const egressPolicyName = "default"
 // needs metadata whose atespace is the actor's. The fake does not validate
 // rules beyond that.
 
+// EgressPolicyCalls returns how many egress policy calls (create, get,
+// update, delete) the server received.
+func (s *Server) EgressPolicyCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.egressCalls
+}
+
 func (s *Server) CreateActorEgressPolicy(ctx context.Context, req *ateapipb.CreateActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
+	s.mu.Lock()
+	s.egressCalls++
+	s.mu.Unlock()
+	if s.OnCreateEgressPolicy != nil {
+		if err := s.OnCreateEgressPolicy(ctx); err != nil {
+			return nil, err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ref := req.GetActor()
@@ -82,6 +98,7 @@ func (s *Server) CreateActorEgressPolicy(ctx context.Context, req *ateapipb.Crea
 func (s *Server) GetActorEgressPolicy(ctx context.Context, req *ateapipb.GetActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.egressCalls++
 	ref := req.GetActor()
 	if err := checkEgressPolicyRef(ref, req.GetName()); err != nil {
 		return nil, err
@@ -96,6 +113,7 @@ func (s *Server) GetActorEgressPolicy(ctx context.Context, req *ateapipb.GetActo
 func (s *Server) UpdateActorEgressPolicy(ctx context.Context, req *ateapipb.UpdateActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.egressCalls++
 	ref := req.GetActor()
 	in := req.GetEgressPolicy()
 	if err := checkEgressPolicyWrite(ref, in); err != nil {
@@ -125,6 +143,7 @@ func (s *Server) UpdateActorEgressPolicy(ctx context.Context, req *ateapipb.Upda
 func (s *Server) DeleteActorEgressPolicy(ctx context.Context, req *ateapipb.DeleteActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.egressCalls++
 	ref := req.GetActor()
 	if err := checkEgressPolicyRef(ref, req.GetName()); err != nil {
 		return nil, err

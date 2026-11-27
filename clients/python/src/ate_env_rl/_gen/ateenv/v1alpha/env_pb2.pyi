@@ -104,7 +104,7 @@ class Environment(_message.Message):
     def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., template: _Optional[_Union[Template, _Mapping]] = ..., status: _Optional[_Union[EnvironmentStatus, str]] = ..., node: _Optional[str] = ..., worker_selector: _Optional[_Mapping[str, str]] = ..., create_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class CreateEnvironmentRequest(_message.Message):
-    __slots__ = ("id", "atespace", "template", "rootfs_image", "worker_selector", "time_to_live")
+    __slots__ = ("id", "atespace", "template", "rootfs_image", "worker_selector", "time_to_live", "egress_policy")
     class WorkerSelectorEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -118,13 +118,67 @@ class CreateEnvironmentRequest(_message.Message):
     ROOTFS_IMAGE_FIELD_NUMBER: _ClassVar[int]
     WORKER_SELECTOR_FIELD_NUMBER: _ClassVar[int]
     TIME_TO_LIVE_FIELD_NUMBER: _ClassVar[int]
+    EGRESS_POLICY_FIELD_NUMBER: _ClassVar[int]
     id: str
     atespace: str
     template: Template
     rootfs_image: str
     worker_selector: _containers.ScalarMap[str, str]
     time_to_live: _duration_pb2.Duration
-    def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., template: _Optional[_Union[Template, _Mapping]] = ..., rootfs_image: _Optional[str] = ..., worker_selector: _Optional[_Mapping[str, str]] = ..., time_to_live: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+    egress_policy: EgressPolicy
+    def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., template: _Optional[_Union[Template, _Mapping]] = ..., rootfs_image: _Optional[str] = ..., worker_selector: _Optional[_Mapping[str, str]] = ..., time_to_live: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., egress_policy: _Optional[_Union[EgressPolicy, _Mapping]] = ...) -> None: ...
+
+class EgressPolicy(_message.Message):
+    __slots__ = ("rules",)
+    RULES_FIELD_NUMBER: _ClassVar[int]
+    rules: _containers.RepeatedCompositeFieldContainer[EgressRule]
+    def __init__(self, rules: _Optional[_Iterable[_Union[EgressRule, _Mapping]]] = ...) -> None: ...
+
+class EgressRule(_message.Message):
+    __slots__ = ("http", "https", "tls_passthrough")
+    HTTP_FIELD_NUMBER: _ClassVar[int]
+    HTTPS_FIELD_NUMBER: _ClassVar[int]
+    TLS_PASSTHROUGH_FIELD_NUMBER: _ClassVar[int]
+    http: HttpRule
+    https: HttpsRule
+    tls_passthrough: TlsPassthroughRule
+    def __init__(self, http: _Optional[_Union[HttpRule, _Mapping]] = ..., https: _Optional[_Union[HttpsRule, _Mapping]] = ..., tls_passthrough: _Optional[_Union[TlsPassthroughRule, _Mapping]] = ...) -> None: ...
+
+class HttpRule(_message.Message):
+    __slots__ = ("hostnames", "ports")
+    HOSTNAMES_FIELD_NUMBER: _ClassVar[int]
+    PORTS_FIELD_NUMBER: _ClassVar[int]
+    hostnames: _containers.RepeatedScalarFieldContainer[str]
+    ports: Ports
+    def __init__(self, hostnames: _Optional[_Iterable[str]] = ..., ports: _Optional[_Union[Ports, _Mapping]] = ...) -> None: ...
+
+class HttpsRule(_message.Message):
+    __slots__ = ("hostnames", "ports")
+    HOSTNAMES_FIELD_NUMBER: _ClassVar[int]
+    PORTS_FIELD_NUMBER: _ClassVar[int]
+    hostnames: _containers.RepeatedScalarFieldContainer[str]
+    ports: Ports
+    def __init__(self, hostnames: _Optional[_Iterable[str]] = ..., ports: _Optional[_Union[Ports, _Mapping]] = ...) -> None: ...
+
+class TlsPassthroughRule(_message.Message):
+    __slots__ = ("hostnames", "ports")
+    HOSTNAMES_FIELD_NUMBER: _ClassVar[int]
+    PORTS_FIELD_NUMBER: _ClassVar[int]
+    hostnames: _containers.RepeatedScalarFieldContainer[str]
+    ports: Ports
+    def __init__(self, hostnames: _Optional[_Iterable[str]] = ..., ports: _Optional[_Union[Ports, _Mapping]] = ...) -> None: ...
+
+class Ports(_message.Message):
+    __slots__ = ("all", "numbers")
+    ALL_FIELD_NUMBER: _ClassVar[int]
+    NUMBERS_FIELD_NUMBER: _ClassVar[int]
+    all: AllPorts
+    numbers: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, all: _Optional[_Union[AllPorts, _Mapping]] = ..., numbers: _Optional[_Iterable[int]] = ...) -> None: ...
+
+class AllPorts(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class CreateEnvironmentResponse(_message.Message):
     __slots__ = ("environment",)
