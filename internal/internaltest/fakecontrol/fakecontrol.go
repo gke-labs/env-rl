@@ -18,7 +18,8 @@
 // status, and, like Substrate v0.6.0, an actor in any state can be deleted
 // (a CRASHED one too, unless KeepCrashed mirrors today's refusal). Tests
 // inject the failures of a control plane under load with FailCreates,
-// FailResumes, FailDeletes and, on state reads, FailGets.
+// FailResumes, FailDeletes and, on state reads, FailGets. It also serves
+// the actor egress policy RPCs (egresspolicy.go).
 package fakecontrol
 
 import (
@@ -61,6 +62,10 @@ type Server struct {
 	templates          map[string]*ateapipb.ActorTemplate
 	// tags are the Tags ListTags reports (AddTag seeds them).
 	tags map[string]*ateapipb.Tag
+	// egressPolicies are the actors' egress policies, keyed as actors are
+	// (see egresspolicy.go). egressSeq numbers them, for their uids.
+	egressPolicies map[string]*ateapipb.EgressPolicy
+	egressSeq      int
 	// actorSeq numbers the actors CreateActor accepted, for their uids.
 	actorSeq int
 	// lastTemplateCreateMD is the incoming metadata of the last
@@ -1064,6 +1069,8 @@ func (s *Server) DeleteActor(ctx context.Context, req *ateapipb.DeleteActorReque
 	}
 	delete(s.actors, key(ref.GetAtespace(), ref.GetName()))
 	delete(s.pendingGets, key(ref.GetAtespace(), ref.GetName()))
+	// Substrate deletes the actor's egress policy with the actor.
+	delete(s.egressPolicies, key(ref.GetAtespace(), ref.GetName()))
 	return clone(a), nil
 }
 
