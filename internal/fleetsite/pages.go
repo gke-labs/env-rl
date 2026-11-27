@@ -28,8 +28,13 @@ import (
 	"github.com/agent-substrate/env/internal/inventory"
 )
 
-// maxActorRows bounds the actor rows of one Cluster page.
-const maxActorRows = 1000
+// maxRows bounds each list of the Cluster page, and the options of each of its
+// filter menus; the JSON API keeps every row.
+const maxRows = 200
+
+// clusterParams are the Cluster page's filters; a form keeps the other
+// sections' filters as hidden fields in this order.
+var clusterParams = [...]string{"atespace", "template", "state", "node", "pool", "base", "golden"}
 
 // maxFleetPools bounds the WorkerPool rows of one cluster on the Fleet page.
 const maxFleetPools = 10
@@ -217,15 +222,190 @@ type poolCapacity struct {
 	Capacity, Allocated inventory.Resources
 }
 
-type actorFilter struct {
-	Atespace, Template, State, Node string
+// listed is one bounded list of the Cluster page: the first maxRows of the
+// Matched rows that pass its filter, of Total in the snapshot.
+type listed[T any] struct {
+	Rows           []T
+	Matched, Total int
 }
 
-func (f actorFilter) match(a inventory.Actor) bool {
-	return (f.Atespace == "" || a.Atespace == f.Atespace) &&
-		(f.Template == "" || a.Template == f.Template) &&
-		(f.State == "" || a.State == f.State) &&
-		(f.Node == "" || a.AssignedNode == f.Node)
+// Truncated reports whether the page leaves out matching rows.
+func (l listed[T]) Truncated() bool { return l.Matched > len(l.Rows) }
+
+// list keeps the first maxRows items that keep accepts.
+func list[T any](items []T, keep func(T) bool) listed[T] {
+	l := listed[T]{Total: len(items)}
+	for _, it := range items {
+		if !keep(it) {
+			continue
+		}
+		l.Matched++
+		if len(l.Rows) < maxRows {
+			l.Rows = append(l.Rows, it)
+		}
+	}
+	return l
+}
+
+func all[T any](T) bool { return true }
+
+// filterField is one filter of a Cluster page form: a menu of its Options and
+// the active value, or a text box when there are no options or more than
+// maxRows of them.
+type filterField struct {
+	Name, Label, Value string
+	Options            []string
+}
+
+// queryParam is one filter of another section, which a form keeps as a
+// hidden field.
+type queryParam struct{ Name, Value string }
+
+type filterForm struct {
+	Section string
+	Fields  []filterField
+	Keep    []queryParam
+}
+
+// clusterQuery is the Cluster page's filters.
+type clusterQuery url.Values
+
+func (q clusterQuery) get(name string) string { return url.Values(q).Get(name) }
+
+// form returns a form of fields that keeps the filters of the other sections.
+func (q clusterQuery) form(section string, fields ...filterField) filterForm {
+	f := filterForm{Section: section}
+	own := map[string]bool{}
+	for _, fd := range fields {
+		own[fd.Name] = true
+		fd.Value = q.get(fd.Name)
+		// An active filter whose value the snapshot no longer has (a
+		// failure that cleared, a deleted WorkerPool) stays selected, so it
+		// shows and can be cleared. It counts toward the menu bound.
+		if fd.Value != "" && len(fd.Options) > 0 && !slices.Contains(fd.Options, fd.Value) {
+			fd.Options = append(slices.Clone(fd.Options), fd.Value)
+			sort.Strings(fd.Options)
+		}
+		if len(fd.Options) > maxRows {
+			fd.Options = nil
+		}
+		f.Fields = append(f.Fields, fd)
+	}
+	for _, name := range clusterParams {
+		if v := q.get(name); v != "" && !own[name] {
+			f.Keep = append(f.Keep, queryParam{name, v})
+		}
+	}
+	return f
+}
+
+// url returns the page's query with each name and value pair of kv set, or
+// removed when the value is empty, and section as the fragment.
+func (q clusterQuery) url(section string, kv ...string) string {
+	v := url.Values{}
+	for _, name := range clusterParams {
+		if s := q.get(name); s != "" {
+			v.Set(name, s)
+		}
+	}
+	for i := 0; i+1 < len(kv); i += 2 {
+		if kv[i+1] == "" {
+			v.Del(kv[i])
+		} else {
+			v.Set(kv[i], kv[i+1])
+		}
+	}
+	return "?" + v.Encode() + "#" + section
+}
+
+func (q clusterQuery) matchActor(a inventory.Actor) bool {
+	return match(q.get("atespace"), a.Atespace) && match(q.get("template"), a.Template) &&
+		match(q.get("state"), a.State) && match(q.get("node"), a.AssignedNode)
+}
+
+func match(filter, v string) bool { return filter == "" || filter == v }
+
+// templateRoot is the base template a template derives from, or the template
+// itself when it is a base.
+func templateRoot(t inventory.Template) string {
+	if t.Base != "" {
+		return t.Base
+	}
+	return t.Name
+}
+
+// rootRow counts the templates of one base template by golden state.
+type rootRow struct {
+	Name   string
+	URL    string
+	Count  int
+	Golden []goldenCount
+}
+
+type goldenCount struct {
+	State, URL string
+	Count      int
+}
+
+// templateRoots groups templates by templateRoot across atespaces, largest
+// group first, and returns the first maxRows groups and every root's name.
+func templateRoots(q clusterQuery, templates []inventory.Template) (listed[rootRow], []string) {
+	index := map[string]int{}
+	var rows []rootRow
+	var golden []map[string]int
+	for _, t := range templates {
+		root := templateRoot(t)
+		i, ok := index[root]
+		if !ok {
+			i = len(rows)
+			index[root] = i
+			rows = append(rows, rootRow{Name: root})
+			golden = append(golden, map[string]int{})
+		}
+		rows[i].Count++
+		if t.GoldenState != "" {
+			golden[i][t.GoldenState]++
+		}
+	}
+	names := make([]string, len(rows))
+	for i := range rows {
+		names[i] = rows[i].Name
+		for _, st := range sortedKeys(golden[i]) {
+			rows[i].Golden = append(rows[i].Golden, goldenCount{State: st, Count: golden[i][st]})
+		}
+	}
+	sort.Strings(names)
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	l := listed[rootRow]{Rows: rows[:min(len(rows), maxRows)], Matched: len(rows), Total: len(rows)}
+	for i := range l.Rows {
+		r := &l.Rows[i]
+		r.URL = q.url("templates", "base", r.Name, "golden", "")
+		for j := range r.Golden {
+			r.Golden[j].URL = q.url("templates", "base", r.Name, "golden", r.Golden[j].State)
+		}
+	}
+	return l, names
+}
+
+func sortedKeys(m map[string]int) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// clusterPool is a Cluster page WorkerPool row, with the link that filters
+// the workers to it.
+type clusterPool struct {
+	poolCapacity
+	WorkersURL string
 }
 
 func distinct(values func(yield func(string))) []string {
@@ -259,6 +439,7 @@ func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request) {
 	now := s.cfg.Now()
 	data := map[string]any{
 		"Title":   project + "/" + cluster,
+		"MaxRows": maxRows,
 		"Summary": summarize(c, now),
 		"Age":     c.Age(now),
 	}
@@ -267,11 +448,12 @@ func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, http.StatusOK, "cluster.html", data)
 		return
 	}
+	q := clusterQuery(r.URL.Query())
 
-	pools := make([]poolCapacity, len(snap.WorkerPools))
+	pools := make([]clusterPool, len(snap.WorkerPools))
 	index := map[string]int{}
 	for i, p := range snap.WorkerPools {
-		pools[i] = poolCapacity{WorkerPool: p}
+		pools[i] = clusterPool{poolCapacity: poolCapacity{WorkerPool: p}, WorkersURL: q.url("workers", "pool", p.Namespace+"/"+p.Name)}
 		index[p.Namespace+"\x00"+p.Name] = i
 	}
 	for _, wk := range snap.Workers {
@@ -279,7 +461,7 @@ func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		p := &pools[i]
+		p := &pools[i].poolCapacity
 		p.Workers++
 		if wk.State == inventory.WorkerStateActive {
 			p.Active++
@@ -290,46 +472,61 @@ func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request) {
 		p.Allocated.MemoryBytes += wk.Allocated.MemoryBytes
 	}
 
-	q := r.URL.Query()
-	filter := actorFilter{Atespace: q.Get("atespace"), Template: q.Get("template"), State: q.Get("state"), Node: q.Get("node")}
-	var actors []inventory.Actor
-	matched := 0
-	for _, a := range snap.Actors {
-		if !filter.match(a) {
-			continue
-		}
-		matched++
-		if len(actors) < maxActorRows {
-			actors = append(actors, a)
-		}
-	}
-
 	data["Snapshot"] = snap
 	data["States"] = statesOf(snap.Counts.ActorsByState)
-	data["Pools"] = pools
-	data["Filter"] = filter
-	data["Actors"] = actors
-	data["Matched"] = matched
-	data["Truncated"] = matched > len(actors)
-	data["AtespaceOptions"] = distinct(func(y func(string)) {
-		for _, a := range snap.Atespaces {
-			y(a.Name)
-		}
+	data["Deployments"] = list(snap.Deployments, all)
+	data["Pools"] = list(pools, all)
+	data["Workers"] = list(snap.Workers, func(wk inventory.Worker) bool {
+		return match(q.get("pool"), wk.Namespace+"/"+wk.Pool)
 	})
-	data["TemplateOptions"] = distinct(func(y func(string)) {
-		for _, a := range snap.Actors {
-			y(a.Template)
+	data["WorkerForm"] = q.form("workers", filterField{Name: "pool", Label: "WorkerPool", Options: distinct(func(y func(string)) {
+		for _, p := range snap.WorkerPools {
+			y(p.Namespace + "/" + p.Name)
 		}
-	})
-	data["StateOptions"] = distinct(func(y func(string)) {
-		for st := range snap.Counts.ActorsByState {
-			y(st)
+		// Workers can outlive their WorkerPool object while they drain.
+		for _, wk := range snap.Workers {
+			if wk.Namespace != "" && wk.Pool != "" {
+				y(wk.Namespace + "/" + wk.Pool)
+			}
 		}
+	})})
+	data["Actors"] = list(snap.Actors, q.matchActor)
+	data["ActorForm"] = q.form("actors",
+		filterField{Name: "atespace", Label: "Atespace", Options: distinct(func(y func(string)) {
+			for _, a := range snap.Atespaces {
+				y(a.Name)
+			}
+		})},
+		filterField{Name: "template", Label: "Template", Options: distinct(func(y func(string)) {
+			for _, a := range snap.Actors {
+				y(a.Template)
+			}
+		})},
+		filterField{Name: "state", Label: "State", Options: distinct(func(y func(string)) {
+			for st := range snap.Counts.ActorsByState {
+				y(st)
+			}
+		})},
+		filterField{Name: "node", Label: "Node", Options: distinct(func(y func(string)) {
+			for _, a := range snap.Actors {
+				y(a.AssignedNode)
+			}
+		})},
+	)
+	roots, rootNames := templateRoots(q, snap.Templates)
+	data["Roots"] = roots
+	data["Templates"] = list(snap.Templates, func(t inventory.Template) bool {
+		return match(q.get("base"), templateRoot(t)) && match(q.get("golden"), t.GoldenState)
 	})
-	data["NodeOptions"] = distinct(func(y func(string)) {
-		for _, a := range snap.Actors {
-			y(a.AssignedNode)
-		}
-	})
+	data["TemplateForm"] = q.form("templates",
+		filterField{Name: "base", Label: "Base template", Options: rootNames},
+		filterField{Name: "golden", Label: "Golden", Options: distinct(func(y func(string)) {
+			for _, t := range snap.Templates {
+				y(t.GoldenState)
+			}
+		})},
+	)
+	data["Atespaces"] = list(snap.Atespaces, all)
+	data["Tags"] = list(snap.Tags, all)
 	s.render(w, r, http.StatusOK, "cluster.html", data)
 }

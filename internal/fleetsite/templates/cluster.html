@@ -21,49 +21,55 @@ limitations under the License.
 <p class="muted"><a href="{{apiClusterURL $s.Project $s.Cluster}}">JSON</a></p>
 {{if $s.Error}}<p class="error">{{$s.Error}}</p>{{end}}
 {{with .Snapshot}}
-<p class="muted">Snapshot {{timestamp .GeneratedAt}} by ate-env-reporter {{.Reporter.Version}}{{with .Reporter.Commit}} ({{.}}){{end}} every {{.Reporter.IntervalSeconds}}s.</p>
+<p class="muted">Snapshot {{timestamp .GeneratedAt}} by ate-env-reporter {{.Reporter.Version}}{{with .Reporter.Commit}} ({{.}}){{end}} every {{.Reporter.IntervalSeconds}}s. Each list shows at most {{$.MaxRows}} rows; the JSON has them all.</p>
 <p>{{len .Actors}} actors{{range $.States}} · <span class="st-text st-{{.State}}">{{.State}} {{.Count}}</span>{{end}}</p>
 
 <h2>ate-env-api deployments</h2>
+{{template "shown" $.Deployments}}
 <table>
   <tr><th>Namespace</th><th>Name</th><th>Version</th><th>Image</th><th>Ready</th><th>Tracing</th><th>Metrics</th></tr>
-  {{range .Deployments}}<tr><td>{{.Namespace}}</td><td>{{.Name}}</td><td>{{or .Version "?"}}</td><td class="mono">{{.Image}}</td><td>{{.Ready}}</td><td>{{if .Tracing}}on{{else}}off{{end}}</td><td>{{if .MetricsPort}}:{{.MetricsPort}}{{else}}off{{end}}</td></tr>
+  {{range $.Deployments.Rows}}<tr><td>{{.Namespace}}</td><td>{{.Name}}</td><td>{{or .Version "?"}}</td><td class="mono">{{.Image}}</td><td>{{.Ready}}</td><td>{{if .Tracing}}on{{else}}off{{end}}</td><td>{{if .MetricsPort}}:{{.MetricsPort}}{{else}}off{{end}}</td></tr>
   {{else}}<tr><td colspan="7" class="muted">none</td></tr>{{end}}
 </table>
 
 <h2>WorkerPools</h2>
+{{template "shown" $.Pools}}
 <table>
   <tr><th>Pool</th><th>Ready / desired</th><th>Workers (active)</th><th>CPU allocated / capacity</th><th>Memory allocated / capacity</th><th>Sandbox</th><th>Worker image</th></tr>
-  {{range $.Pools}}<tr><td>{{.Namespace}}/{{.Name}}</td><td{{if lt .ReadyReplicas .Replicas}} class="warn"{{end}}>{{.ReadyReplicas}} / {{.Replicas}}</td><td>{{.Workers}} ({{.Active}})</td><td>{{cpu .Allocated.CPUMillicores}} / {{cpu .Capacity.CPUMillicores}}</td><td>{{gib .Allocated.MemoryBytes}} / {{gib .Capacity.MemoryBytes}}</td><td>{{.SandboxClass}}{{with .SandboxConfig}} ({{.}}){{end}}</td><td class="mono">{{.WorkerImage}}</td></tr>
+  {{range $.Pools.Rows}}<tr><td><a href="{{.WorkersURL}}">{{.Namespace}}/{{.Name}}</a></td><td{{if lt .ReadyReplicas .Replicas}} class="warn"{{end}}>{{.ReadyReplicas}} / {{.Replicas}}</td><td>{{.Workers}} ({{.Active}})</td><td>{{cpu .Allocated.CPUMillicores}} / {{cpu .Capacity.CPUMillicores}}</td><td>{{gib .Allocated.MemoryBytes}} / {{gib .Capacity.MemoryBytes}}</td><td>{{.SandboxClass}}{{with .SandboxConfig}} ({{.}}){{end}}</td><td class="mono">{{.WorkerImage}}</td></tr>
   {{else}}<tr><td colspan="7" class="muted">none</td></tr>{{end}}
 </table>
 
-<h2>Workers</h2>
+<h2 id="workers">Workers</h2>
+{{template "filters" $.WorkerForm}}
+{{template "shown" $.Workers}}
 <table>
   <tr><th>Worker</th><th>Pool</th><th>Node</th><th>State</th><th>CPU allocated / capacity</th><th>Memory allocated / capacity</th></tr>
-  {{range .Workers}}<tr><td class="mono">{{.Name}}</td><td>{{.Namespace}}/{{.Pool}}</td><td>{{.Node}}</td><td>{{.State}}</td><td>{{cpu .Allocated.CPUMillicores}} / {{cpu .Capacity.CPUMillicores}}</td><td>{{gib .Allocated.MemoryBytes}} / {{gib .Capacity.MemoryBytes}}</td></tr>
+  {{range $.Workers.Rows}}<tr><td class="mono">{{.Name}}</td><td>{{.Namespace}}/{{.Pool}}</td><td>{{.Node}}</td><td>{{.State}}</td><td>{{cpu .Allocated.CPUMillicores}} / {{cpu .Capacity.CPUMillicores}}</td><td>{{gib .Allocated.MemoryBytes}} / {{gib .Capacity.MemoryBytes}}</td></tr>
   {{else}}<tr><td colspan="6" class="muted">none</td></tr>{{end}}
 </table>
 
-<h2>Actors</h2>
-<form method="get" class="filters">
-  <label>Atespace <select name="atespace"><option value="">any</option>{{range $.AtespaceOptions}}<option value="{{.}}"{{if eq . $.Filter.Atespace}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-  <label>Template <select name="template"><option value="">any</option>{{range $.TemplateOptions}}<option value="{{.}}"{{if eq . $.Filter.Template}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-  <label>State <select name="state"><option value="">any</option>{{range $.StateOptions}}<option value="{{.}}"{{if eq . $.Filter.State}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-  <label>Node <select name="node"><option value="">any</option>{{range $.NodeOptions}}<option value="{{.}}"{{if eq . $.Filter.Node}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-  <button type="submit">Filter</button>
-</form>
-<p class="muted">{{$.Matched}} match{{if $.Truncated}}; the first {{len $.Actors}} are shown{{end}}.</p>
+<h2 id="actors">Actors</h2>
+{{template "filters" $.ActorForm}}
+{{template "shown" $.Actors}}
 <table>
   <tr><th>Atespace</th><th>Name</th><th>UID</th><th>Template</th><th>State</th><th>Node</th><th>Worker</th><th>Updated</th><th>Crash</th></tr>
-  {{range $.Actors}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td class="mono"><a href="{{actorURL .UID}}">{{.UID}}</a></td><td>{{.Template}}{{with .SourceTag}} <span class="muted">from {{.}}</span>{{end}}</td><td><span class="st-text st-{{.State}}">{{.State}}</span></td><td>{{.AssignedNode}}</td><td class="mono">{{.Worker}}</td><td>{{timestamp .UpdateTime}}</td><td>{{with .Crash}}<span class="error">{{.Message}}</span>{{end}}</td></tr>
+  {{range $.Actors.Rows}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td class="mono"><a href="{{actorURL .UID}}">{{.UID}}</a></td><td>{{.Template}}{{with .SourceTag}} <span class="muted">from {{.}}</span>{{end}}</td><td><span class="st-text st-{{.State}}">{{.State}}</span></td><td>{{.AssignedNode}}</td><td class="mono">{{.Worker}}</td><td>{{timestamp .UpdateTime}}</td><td>{{with .Crash}}<span class="error">{{.Message}}</span>{{end}}</td></tr>
   {{else}}<tr><td colspan="9" class="muted">none</td></tr>{{end}}
 </table>
 
-<h2>Templates</h2>
+<h2 id="templates">Templates</h2>
+<p class="muted">{{$.Roots.Total}} base templates{{if $.Roots.Truncated}}; the {{len $.Roots.Rows}} with the most templates are shown{{end}}. A base template counts itself and the templates derived from it, in every atespace.</p>
+<table>
+  <tr><th>Base template</th><th>Templates</th><th>Golden</th></tr>
+  {{range $.Roots.Rows}}<tr><td><a href="{{.URL}}">{{.Name}}</a></td><td>{{.Count}}</td><td>{{range $i, $g := .Golden}}{{if $i}} · {{end}}<a href="{{$g.URL}}">{{$g.State}} {{$g.Count}}</a>{{end}}</td></tr>
+  {{else}}<tr><td colspan="3" class="muted">none</td></tr>{{end}}
+</table>
+{{template "filters" $.TemplateForm}}
+{{template "shown" $.Templates}}
 <table>
   <tr><th>Atespace</th><th>Name</th><th>Base</th><th>Rootfs image</th><th>WorkerPool</th><th>Golden</th></tr>
-  {{range .Templates}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td>{{.Base}}</td><td class="mono">{{.RootfsImage}}</td><td>{{.WorkerPool}}</td><td>{{.GoldenState}}</td></tr>
+  {{range $.Templates.Rows}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td>{{.Base}}</td><td class="mono">{{.RootfsImage}}</td><td>{{.WorkerPool}}</td><td>{{.GoldenState}}</td></tr>
   {{else}}<tr><td colspan="6" class="muted">none</td></tr>{{end}}
 </table>
 
@@ -71,13 +77,25 @@ limitations under the License.
 <table>
   <caption>Atespaces</caption>
   <tr><th>Name</th><th>Created</th></tr>
-  {{range .Atespaces}}<tr><td>{{.Name}}</td><td>{{timestamp .CreateTime}}</td></tr>{{else}}<tr><td colspan="2" class="muted">none</td></tr>{{end}}
+  {{range $.Atespaces.Rows}}<tr><td>{{.Name}}</td><td>{{timestamp .CreateTime}}</td></tr>{{else}}<tr><td colspan="2" class="muted">none</td></tr>{{end}}
 </table>
 <table>
   <caption>Tags</caption>
   <tr><th>Atespace</th><th>Name</th><th>Source actor</th></tr>
-  {{range .Tags}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td>{{.SourceActor}}</td></tr>{{else}}<tr><td colspan="3" class="muted">none</td></tr>{{end}}
+  {{range $.Tags.Rows}}<tr><td>{{.Atespace}}</td><td>{{.Name}}</td><td>{{.SourceActor}}</td></tr>{{else}}<tr><td colspan="3" class="muted">none</td></tr>{{end}}
 </table>
 </div>
+<p class="muted">Atespaces: {{template "count" $.Atespaces}} Tags: {{template "count" $.Tags}}</p>
 {{end}}
+{{end}}
+
+{{define "count"}}{{.Total}} in the snapshot{{if lt .Matched .Total}}, {{.Matched}} match{{end}}{{if .Truncated}}; the first {{len .Rows}} are shown{{end}}.{{end}}
+{{define "shown"}}<p class="muted">{{template "count" .}}</p>{{end}}
+
+{{define "filters"}}
+<form method="get" action="#{{.Section}}" class="filters">
+  {{range .Keep}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+  {{range .Fields}}<label>{{.Label}} {{if .Options}}<select name="{{.Name}}"><option value="">any</option>{{$v := .Value}}{{range .Options}}<option value="{{.}}"{{if eq . $v}} selected{{end}}>{{.}}</option>{{end}}</select>{{else}}<input name="{{.Name}}" value="{{.Value}}" placeholder="exact value">{{end}}</label>
+  {{end}}<button type="submit">Filter</button>
+</form>
 {{end}}

@@ -381,5 +381,31 @@ Append-only. Each entry: date, who, what, why.
   deployments table were 826 to 842 px tall each, so one deployment row showed per screen under a
   grey header block. With the fix the table is 134 px. The Cluster page's atespace and tag tables
   share the class and the fix.
+- 2026-11-25, pull request 4c, found on a dev GKE cluster: its snapshot has 37,255 templates, 49,703
+  tags, 2,923 workers and 125 WorkerPools. The Cluster page listed every row: 16.1 MB of HTML and
+  about 90,000 table rows, which headless Chrome took 14 s to load (22 s in a desktop Chrome), while
+  the site built the page in 0.5 s. Each list of the page now shows its first 200 rows (`maxRows`)
+  in snapshot order and says how many the snapshot has and how many match. The actor list drops from
+  1,000 rows to the same 200. Templates are summarized by base template with counts by golden state,
+  because all but five of them are derived templates, and the summary has six rows there. The
+  `pool`, `base` and `golden` filters reach any worker or template, and each form keeps the other
+  sections' filters as hidden fields. A filter menu with more than 200 values becomes a text box,
+  because the template and node menus grow with the actors. Deployments, WorkerPools, atespaces and
+  tags get no filter: no question on the page names one tag, a cluster has few of the others, and
+  the JSON has them all. The summary groups base templates by name across atespaces, because a
+  cluster runs one ate-env atespace in practice; an atespace column waits for a cluster with two.
+  Paging with an offset is left out: a filter answers which rows, and the 201st row by snapshot
+  order answers nothing the JSON does not. The JSON API stays complete (27 MB in 0.9 s on that
+  cluster): its readers are scripts, interfaces.md says it returns the snapshot as the reporter
+  wrote it, and the 128 MiB read cap bounds it. After the change the page is 264 KB and loads in 0.2
+  s. FS-18 covers it, because no criterion covered the Cluster page.
 - 2026-11-26, orchestrator, pull request 4b: drift check against `main` at `7c04afa` (research.md,
   "Audit of main, 2026-11-26, for pull request 4b"). The seven steps hold.
+- 2026-11-26, pull request 4c: drift check against `main` at `9181b67` (research.md, "Audit of main,
+  2026-11-26, for pull request 4c"). The seven steps hold.
+- 2026-11-26, review of pull request 4c: a filter menu showed "any" when the query named a value the
+  snapshot lacks, such as `?golden=failed` after the failure cleared or the pool of draining workers
+  whose WorkerPool object is gone, while the list stayed filtered. The menu now adds the active
+  value, selected and in order, so it shows and can be cleared. The value counts toward the bound of
+  200: 200 values and an absent active one make a text box that keeps the value. The pool menu also
+  names `namespace/pool` of each worker.

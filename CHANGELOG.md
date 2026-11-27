@@ -19,6 +19,15 @@ user needs to know across them.
   pools listed all of them before. Tables side by side keep their own
   height, so the `ate-env-api` deployments table no longer stretches beside
   a long WorkerPools table and shows every deployment row.
+- `ate-env-fleet-site`: the Cluster page shows at most 200 rows of each list
+  and says how many the snapshot has and how many match. Before, it listed
+  every template, tag and worker: 16 MB of HTML that took a browser 14 to 22 s
+  to load on a cluster with 37,255 templates and 49,703 tags; the page is now
+  264 KB and loads in 0.2 s. Templates are summarized by base template with
+  counts by golden state, and new filters select workers by WorkerPool
+  (`?pool=<namespace>/<name>`) and templates by base template and golden state
+  (`?base=`, `?golden=`). The actor list shows 200 rows instead of 1,000. The
+  JSON API still returns the whole snapshot.
 - `ate-env manifest template` now defaults `--cpu` to `1` and `--memory` to
   `2Gi` (previously `2` and `4Gi`). Substrate books both limits directly
   against worker capacity, so 1 CPU and 2 GiB double default worker slot

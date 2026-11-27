@@ -1,6 +1,6 @@
 # Interface contracts: sandbox fleet site
 
-Status: accepted (#223); last checked 2026-11-26 against `7c04afa`. The snapshot schema in the next
+Status: accepted (#223); last checked 2026-11-26 against `9181b67`. The snapshot schema in the next
 section is code since pull request 1 (#226, `internal/inventory`): its object kinds, field names and
 rules are fixed, and a change to them is a schema change. The names in the other sections (bucket
 layout, reporter flags and identity, event stream and tables, collector pipelines, site routes and
@@ -298,6 +298,17 @@ plan and `build_report.py`. The code is `internal/fleetsite`; pull request 4 shi
 Cluster pages and the first three API routes, pull request 5a the Actor and Live pages, the Live API
 and the metrics API, and pull request 5b the Runs pages and API.
 
+The Cluster page shows at most 200 rows of each list (deployments, WorkerPools, workers, actors,
+templates, atespaces, tags), the first in snapshot order, and says how many the snapshot has and how
+many match. It summarizes templates by base template (a derived template's `base`, else its own
+name, in every atespace) with counts by `golden_state`, the 200 largest first. A base template's
+name links to `?base=`, and each golden count to `?base=&golden=`; a template without a golden state
+counts in its base's total only. A filter menu with more than 200 values is a text box for an exact
+value. An active filter whose value the snapshot lacks is added to its menu, selected, and counts
+toward the 200. The pool menu names the pools of the WorkerPools and of the workers. Each form
+carries the other sections' filters as hidden fields. `GET /api/v1/clusters/{project}/{cluster}` is
+not bounded: it returns the whole snapshot, as the snapshot read cap of 128 MiB allows.
+
 Configuration, each flag with an environment variable for Cloud Run:
 
 | Flag               | Environment             | Meaning                                                                                        |
@@ -343,7 +354,7 @@ site's origin. A run file is read up to 64 MiB.
 | Route                                                                                       | Returns                                                                                                                                                                                                    | Pull request |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
 | `GET /`                                                                                     | Fleet page; per cluster the WorkerPool totals and at most 10 pools, short ones first, with a link to the Cluster page for the rest (FS-17)                                                                 | 4, 4b        |
-| `GET /clusters/{project}/{cluster}`                                                         | Cluster page; `?atespace=&template=&state=&node=` filter the actors, the first 1000 shown                                                                                                                  | 4            |
+| `GET /clusters/{project}/{cluster}`                                                         | Cluster page; `?atespace=&template=&state=&node=` filter the actors, `?pool=<namespace>/<name>` the workers, `?base=&golden=` the templates; each list shows its first 200 rows (FS-18)                    | 4, 4c        |
 | `GET /actors/{uid}`                                                                         | Actor page: the actor in the snapshots, its transitions since `?since=` (default 24 h) with a Cloud Trace link each, its crash record; the events route's limit                                            | 5a           |
 | `GET /runs`, `GET /runs/trainer/{id}`, `GET /runs/bench/{bucket}/{id}`                      | the run index; one trainer run or one bundle (FS-11)                                                                                                                                                       | 5b, 5c       |
 | `GET /runs/trainer/{id}/files/{name}`, `GET /runs/bench/{bucket}/{id}/files/{name}`         | one listed file of the run, as a download                                                                                                                                                                  | 5b           |
