@@ -101,6 +101,7 @@ LOADER_LABEL_KEYS = frozenset({
     "domain_width",
     "create_width",
     "adopt",
+    "wake_width",
 })
 
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")

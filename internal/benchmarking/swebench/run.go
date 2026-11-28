@@ -90,6 +90,10 @@ type Config struct {
 	// CreateWidth, in the step loop, bounds concurrent cold starts (creates
 	// and their first command before Step.Think); 0 means Width.
 	CreateWidth int
+	// WakeWidth, in the step loop, bounds concurrent wakes of a suspended
+	// fleet (first command of a woken step, released before Step.Think).
+	// Zero uses Width.
+	WakeWidth int
 	// TasksPerImage is the eval mode fan-out per image.
 	TasksPerImage int
 	// TaskOrder is the order eval mode visits (image, replay) pairs: "image"
@@ -203,6 +207,14 @@ func (c *Config) createWidth() int {
 	return c.Width
 }
 
+// wakeWidth is the most wakes of a suspended fleet in flight at once in the step loop.
+func (c *Config) wakeWidth() int {
+	if c.WakeWidth > 0 {
+		return c.WakeWidth
+	}
+	return c.Width
+}
+
 // LoaderLabelKeys are the labels the loader records about its own invocation
 // on the run event: the run's shape and the settings that move its latencies
 // and failure counts. report -arm pools only reps that agree on all of them,
@@ -212,7 +224,7 @@ var LoaderLabelKeys = []string{
 	"mode", "strategy", "window_size", "width", "images", "trajectory", "tasks_per_image", "rollouts", "steps", "park",
 	"create_timeout", "step_timeout", "wake_budget", "wake_backoff",
 	"dataset", "connections", "delete_rate", "base_template", "exclude_file", "instances", "seed", "images_per_step",
-	"park_each", "placement", "task_order", "domain_width", "create_width", "adopt",
+	"park_each", "placement", "task_order", "domain_width", "create_width", "adopt", "wake_width",
 }
 
 // labels describes the run for its run event.
@@ -270,6 +282,9 @@ func (c *Config) labels() map[string]string {
 		}
 		if c.Adopt {
 			l["adopt"] = "true"
+		}
+		if c.WakeWidth > 0 {
+			l["wake_width"] = strconv.Itoa(c.WakeWidth)
 		}
 	}
 	for k, v := range c.Invocation {
@@ -345,6 +360,8 @@ func (c *Config) validate() error {
 			return errors.New("create width belongs to the step loop; it cannot be combined with a strategy")
 		case c.Adopt:
 			return errors.New("adopt belongs to the step loop; it cannot be combined with a strategy")
+		case c.WakeWidth > 0:
+			return errors.New("wake width belongs to the step loop and cannot be combined with a strategy")
 		case c.DomainWidth != 0:
 			return errors.New("domain width belongs to eval's loop per domain; it cannot be combined with a strategy")
 		case c.Prefetch:
@@ -392,6 +409,14 @@ func (c *Config) validate() error {
 		return errors.New("create width applies to steps mode")
 	case c.CreateWidth > 0 && c.usesWorkingSet():
 		return errors.New("create width belongs to the step loop; it cannot be combined with a schedule or working-set flags")
+	case c.WakeWidth < 0:
+		return errors.New("wake width must be >= 0")
+	case c.WakeWidth > c.Width:
+		return fmt.Errorf("wake width %d must not exceed width %d", c.WakeWidth, c.Width)
+	case c.WakeWidth > 0 && c.Mode != ModeSteps:
+		return errors.New("wake width applies to steps mode")
+	case c.WakeWidth > 0 && c.usesWorkingSet():
+		return errors.New("wake width belongs to the step loop and cannot be combined with a schedule or working-set flags")
 	}
 	for i, t := range c.Trajectories {
 		if t == nil {
@@ -440,6 +465,14 @@ func (c *Config) validate() error {
 		}
 		if c.ParkEach && c.ImagesPerStep > 0 {
 			return errors.New("park each keeps one fleet across the steps; it cannot be combined with images per step")
+		}
+		if c.WakeWidth > 0 {
+			if c.ImagesPerStep > 0 {
+				return errors.New("wake width wakes a parked fleet across steps and cannot be combined with images per step")
+			}
+			if c.Park != ParkSuspend && c.Park != ParkSuspendSync && c.Park != ParkSuspendAsync {
+				return errors.New("wake width needs park mode suspend, suspend-sync or suspend-async")
+			}
 		}
 	case ModeOpenLoop:
 		if c.TaskOrder == TaskOrderRound {
@@ -599,6 +632,9 @@ type runner struct {
 	// createSem bounds concurrent cold starts (creates through their first
 	// command before Step.Think) to cfg.createWidth(); nil when equal to Width.
 	createSem chan struct{}
+	// wakeSem bounds concurrent wakes of a suspended fleet (first command of a
+	// woken step before Step.Think) to cfg.wakeWidth(). Nil when equal to Width.
+	wakeSem chan struct{}
 
 	mu       sync.Mutex
 	tasks    int
@@ -661,6 +697,9 @@ func Run(ctx context.Context, cfg Config) (*Summary, error) {
 	r := &runner{cfg: &cfg, rec: cfg.Recorder, log: cfg.Logger}
 	if cfg.Mode == ModeSteps && cfg.createWidth() < cfg.Width {
 		r.createSem = make(chan struct{}, cfg.createWidth())
+	}
+	if cfg.Mode == ModeSteps && cfg.Strategy == "" && !cfg.usesWorkingSet() && cfg.wakeWidth() < cfg.Width {
+		r.wakeSem = make(chan struct{}, cfg.wakeWidth())
 	}
 
 	if cfg.Strategy != "" || cfg.usesWorkingSet() {
@@ -1791,6 +1830,13 @@ func (r *runner) replay(ctx context.Context, e *environment, step int) {
 		firstStart = time.Time{}
 	}
 
+	var releaseWakeSem func()
+	defer func() {
+		if releaseWakeSem != nil {
+			releaseWakeSem()
+		}
+	}()
+
 	taskStart := time.Now()
 	ok := true
 	var reward *int
@@ -1817,6 +1863,17 @@ func (r *runner) replay(ctx context.Context, e *environment, step int) {
 				ok = false
 			case r.createSem <- struct{}{}:
 				e.releaseCreateSem = sync.OnceFunc(func() { <-r.createSem })
+			}
+			if !ok {
+				break
+			}
+		}
+		if first && firstEvent == EventWake && r.wakeSem != nil && releaseWakeSem == nil {
+			select {
+			case <-ctx.Done():
+				ok = false
+			case r.wakeSem <- struct{}{}:
+				releaseWakeSem = sync.OnceFunc(func() { <-r.wakeSem })
 			}
 			if !ok {
 				break
@@ -1869,6 +1926,9 @@ func (r *runner) replay(ctx context.Context, e *environment, step int) {
 			if e.releaseCreateSem != nil {
 				e.releaseCreateSem()
 				e.releaseCreateSem = nil
+			}
+			if releaseWakeSem != nil {
+				releaseWakeSem()
 			}
 		}
 		ev := r.event(EventStep, e, step, dur, err)

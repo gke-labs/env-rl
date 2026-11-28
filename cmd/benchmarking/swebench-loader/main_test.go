@@ -2437,3 +2437,78 @@ func TestRunCmdAdoptFlags(t *testing.T) {
 		t.Fatalf("runCmd with non-Adopter backend = %v, want Adopter error", err)
 	}
 }
+
+// SL-14: runCmd refuses -wake-width with -strategy (including -wake-width 0),
+// outside steps mode, and on non-suspend parks, while accepting valid -mode
+// steps suspend invocations.
+func TestRunCmdWakeWidthFlags(t *testing.T) {
+	const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "cmd.jsonl")
+	row := `{"kind":"command","instance_id":"c1","image":"reg/cmd@` + digest + `","command":"true"}` + "\n"
+	if err := os.WriteFile(manifest, []byte(row), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "strategy with positive wake-width",
+			args:    []string{"-dataset", manifest, "-strategy", "none", "-wake-width", "2", "-dry-run"},
+			wantErr: "-wake-width belongs to the step loop",
+		},
+		{
+			name:    "strategy with zero wake-width",
+			args:    []string{"-dataset", manifest, "-strategy", "none", "-wake-width", "0", "-dry-run"},
+			wantErr: "-wake-width belongs to the step loop",
+		},
+		{
+			name:    "eval mode with wake-width",
+			args:    []string{"-dataset", manifest, "-mode", "eval", "-width", "4", "-wake-width", "2", "-dry-run"},
+			wantErr: "steps mode",
+		},
+		{
+			name:    "delete park with wake-width",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "delete", "-width", "4", "-wake-width", "2", "-dry-run"},
+			wantErr: "park mode suspend",
+		},
+		{
+			name:    "negative wake-width",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-width", "4", "-wake-width", "-1", "-dry-run"},
+			wantErr: ">= 0",
+		},
+		{
+			name:    "wake-width above width",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-width", "4", "-wake-width", "5", "-dry-run"},
+			wantErr: "must not exceed width",
+		},
+		{
+			name:    "images-per-step with wake-width",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "delete", "-images-per-step", "1", "-width", "4", "-wake-width", "2", "-dry-run"},
+			wantErr: "images per step",
+		},
+		{
+			name:    "working-set prefetch with wake-width",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-prefetch", "-width", "4", "-wake-width", "2", "-dry-run"},
+			wantErr: "step loop",
+		},
+		{
+			name:    "valid steps suspend dry-run",
+			args:    []string{"-dataset", manifest, "-mode", "steps", "-park", "suspend", "-width", "4", "-wake-width", "2", "-dry-run"},
+			wantErr: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runCmd(tc.args)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("runCmd(%v) = %v, want nil", tc.args, err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("runCmd(%v) = %v, want error containing %q", tc.args, err, tc.wantErr)
+			}
+		})
+	}
+}
