@@ -96,6 +96,16 @@ user needs to know across them.
   pre-flight's job (`swebench-loader preflight`), not the prewarm's.
 
 ### Added
+- `ate-env-api` serves `ForkEnvironment`, which copies one environment 1 to
+  64 times: it suspends the source locally, tags its snapshot with
+  Substrate's `CreateTag` and creates each copy from the tag under the
+  source's template, so every copy resumes from the source's memory and
+  files. Copies are born suspended and wake on their first call. All or
+  nothing: a failed copy deletes the others and the tag. The tag of a fork
+  that succeeds stays and is returned in `source_tag`. Copies get no labels
+  and no deadline from the source. `GetServerInfo` lists `fork_environment`.
+  The Go client adds `Client.Fork` and `Env.Fork`, the Python client
+  `Client.fork` and `Env.fork`, and the CLI `ate-env fork <id> --count N`.
 - `ate-env-api` with `--enable-tracing` stamps the environment or template
   each call targets on its server span, under the `ateattr` keys `ateapi`
   stamps on its actor RPCs: `ate.atespace` and `ate.actor.name` (the

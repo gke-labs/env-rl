@@ -44,6 +44,7 @@ const (
 	EnvironmentService_SuspendEnvironment_FullMethodName       = "/ateenv.v1alpha.EnvironmentService/SuspendEnvironment"
 	EnvironmentService_DeleteEnvironment_FullMethodName        = "/ateenv.v1alpha.EnvironmentService/DeleteEnvironment"
 	EnvironmentService_SetEnvironmentTimeToLive_FullMethodName = "/ateenv.v1alpha.EnvironmentService/SetEnvironmentTimeToLive"
+	EnvironmentService_ForkEnvironment_FullMethodName          = "/ateenv.v1alpha.EnvironmentService/ForkEnvironment"
 	EnvironmentService_GetServerInfo_FullMethodName            = "/ateenv.v1alpha.EnvironmentService/GetServerInfo"
 	EnvironmentService_GetImageStatus_FullMethodName           = "/ateenv.v1alpha.EnvironmentService/GetImageStatus"
 	EnvironmentService_EnsureImageTemplate_FullMethodName      = "/ateenv.v1alpha.EnvironmentService/EnsureImageTemplate"
@@ -79,6 +80,16 @@ type EnvironmentServiceClient interface {
 	// call needs the environment store (GetServerInfo lists "time_to_live");
 	// without it the call is FAILED_PRECONDITION and changes nothing.
 	SetEnvironmentTimeToLive(ctx context.Context, in *SetEnvironmentTimeToLiveRequest, opts ...grpc.CallOption) (*SetEnvironmentTimeToLiveResponse, error)
+	// ForkEnvironment copies one environment count times: each copy resumes
+	// from the source's state at the time of the call, its memory and files
+	// included. The server suspends the source locally (a no-op when it is
+	// suspended or paused already), tags its snapshot in Substrate, and creates
+	// each copy from that tag under the source's template. The source stays
+	// suspended and wakes on its next call. Copies are born suspended and
+	// unplaced, like a new environment, and wake on their first call. All or
+	// nothing: when one copy fails, the server deletes the copies it created
+	// and the tag, and returns the error.
+	ForkEnvironment(ctx context.Context, in *ForkEnvironmentRequest, opts ...grpc.CallOption) (*ForkEnvironmentResponse, error)
 	// GetServerInfo reports which server implementation answers, its version, and
 	// the optional features it serves, so a client can check them before it
 	// depends on them.
@@ -182,6 +193,16 @@ func (c *environmentServiceClient) SetEnvironmentTimeToLive(ctx context.Context,
 	return out, nil
 }
 
+func (c *environmentServiceClient) ForkEnvironment(ctx context.Context, in *ForkEnvironmentRequest, opts ...grpc.CallOption) (*ForkEnvironmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ForkEnvironmentResponse)
+	err := c.cc.Invoke(ctx, EnvironmentService_ForkEnvironment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *environmentServiceClient) GetServerInfo(ctx context.Context, in *GetServerInfoRequest, opts ...grpc.CallOption) (*GetServerInfoResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetServerInfoResponse)
@@ -269,6 +290,16 @@ type EnvironmentServiceServer interface {
 	// call needs the environment store (GetServerInfo lists "time_to_live");
 	// without it the call is FAILED_PRECONDITION and changes nothing.
 	SetEnvironmentTimeToLive(context.Context, *SetEnvironmentTimeToLiveRequest) (*SetEnvironmentTimeToLiveResponse, error)
+	// ForkEnvironment copies one environment count times: each copy resumes
+	// from the source's state at the time of the call, its memory and files
+	// included. The server suspends the source locally (a no-op when it is
+	// suspended or paused already), tags its snapshot in Substrate, and creates
+	// each copy from that tag under the source's template. The source stays
+	// suspended and wakes on its next call. Copies are born suspended and
+	// unplaced, like a new environment, and wake on their first call. All or
+	// nothing: when one copy fails, the server deletes the copies it created
+	// and the tag, and returns the error.
+	ForkEnvironment(context.Context, *ForkEnvironmentRequest) (*ForkEnvironmentResponse, error)
 	// GetServerInfo reports which server implementation answers, its version, and
 	// the optional features it serves, so a client can check them before it
 	// depends on them.
@@ -329,6 +360,9 @@ func (UnimplementedEnvironmentServiceServer) DeleteEnvironment(context.Context, 
 }
 func (UnimplementedEnvironmentServiceServer) SetEnvironmentTimeToLive(context.Context, *SetEnvironmentTimeToLiveRequest) (*SetEnvironmentTimeToLiveResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetEnvironmentTimeToLive not implemented")
+}
+func (UnimplementedEnvironmentServiceServer) ForkEnvironment(context.Context, *ForkEnvironmentRequest) (*ForkEnvironmentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ForkEnvironment not implemented")
 }
 func (UnimplementedEnvironmentServiceServer) GetServerInfo(context.Context, *GetServerInfoRequest) (*GetServerInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetServerInfo not implemented")
@@ -474,6 +508,24 @@ func _EnvironmentService_SetEnvironmentTimeToLive_Handler(srv interface{}, ctx c
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EnvironmentService_ForkEnvironment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForkEnvironmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnvironmentServiceServer).ForkEnvironment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EnvironmentService_ForkEnvironment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnvironmentServiceServer).ForkEnvironment(ctx, req.(*ForkEnvironmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _EnvironmentService_GetServerInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetServerInfoRequest)
 	if err := dec(in); err != nil {
@@ -587,6 +639,10 @@ var EnvironmentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetEnvironmentTimeToLive",
 			Handler:    _EnvironmentService_SetEnvironmentTimeToLive_Handler,
+		},
+		{
+			MethodName: "ForkEnvironment",
+			Handler:    _EnvironmentService_ForkEnvironment_Handler,
 		},
 		{
 			MethodName: "GetServerInfo",

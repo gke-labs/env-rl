@@ -65,6 +65,7 @@ const (
 	opSuspendEnvironment       = "suspend_environment"
 	opDeleteEnvironment        = "delete_environment"
 	opSetEnvironmentTimeToLive = "set_environment_time_to_live"
+	opForkEnvironment          = "fork_environment"
 	opStartProcess             = "start_process"
 	opExec                     = "exec"
 	opReadFile                 = "read_file"

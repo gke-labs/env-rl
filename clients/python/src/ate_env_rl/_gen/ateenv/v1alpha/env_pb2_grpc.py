@@ -83,6 +83,11 @@ class EnvironmentServiceStub:
                 request_serializer=ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveRequest.SerializeToString,
                 response_deserializer=ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveResponse.FromString,
                 _registered_method=True)
+        self.ForkEnvironment = channel.unary_unary(
+                '/ateenv.v1alpha.EnvironmentService/ForkEnvironment',
+                request_serializer=ateenv_dot_v1alpha_dot_env__pb2.ForkEnvironmentRequest.SerializeToString,
+                response_deserializer=ateenv_dot_v1alpha_dot_env__pb2.ForkEnvironmentResponse.FromString,
+                _registered_method=True)
         self.GetServerInfo = channel.unary_unary(
                 '/ateenv.v1alpha.EnvironmentService/GetServerInfo',
                 request_serializer=ateenv_dot_v1alpha_dot_env__pb2.GetServerInfoRequest.SerializeToString,
@@ -165,6 +170,21 @@ class EnvironmentServiceServicer:
         server deletes an environment after its deadline, in any status. The
         call needs the environment store (GetServerInfo lists "time_to_live");
         without it the call is FAILED_PRECONDITION and changes nothing.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ForkEnvironment(self, request, context):
+        """ForkEnvironment copies one environment count times: each copy resumes
+        from the source's state at the time of the call, its memory and files
+        included. The server suspends the source locally (a no-op when it is
+        suspended or paused already), tags its snapshot in Substrate, and creates
+        each copy from that tag under the source's template. The source stays
+        suspended and wakes on its next call. Copies are born suspended and
+        unplaced, like a new environment, and wake on their first call. All or
+        nothing: when one copy fails, the server deletes the copies it created
+        and the tag, and returns the error.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -260,6 +280,11 @@ def add_EnvironmentServiceServicer_to_server(servicer, server):
                     servicer.SetEnvironmentTimeToLive,
                     request_deserializer=ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveRequest.FromString,
                     response_serializer=ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveResponse.SerializeToString,
+            ),
+            'ForkEnvironment': grpc.unary_unary_rpc_method_handler(
+                    servicer.ForkEnvironment,
+                    request_deserializer=ateenv_dot_v1alpha_dot_env__pb2.ForkEnvironmentRequest.FromString,
+                    response_serializer=ateenv_dot_v1alpha_dot_env__pb2.ForkEnvironmentResponse.SerializeToString,
             ),
             'GetServerInfo': grpc.unary_unary_rpc_method_handler(
                     servicer.GetServerInfo,
@@ -454,6 +479,33 @@ class EnvironmentService:
             '/ateenv.v1alpha.EnvironmentService/SetEnvironmentTimeToLive',
             ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveRequest.SerializeToString,
             ateenv_dot_v1alpha_dot_env__pb2.SetEnvironmentTimeToLiveResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ForkEnvironment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ateenv.v1alpha.EnvironmentService/ForkEnvironment',
+            ateenv_dot_v1alpha_dot_env__pb2.ForkEnvironmentRequest.SerializeToString,
+            ateenv_dot_v1alpha_dot_env__pb2.ForkEnvironmentResponse.FromString,
             options,
             channel_credentials,
             insecure,

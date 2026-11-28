@@ -141,6 +141,82 @@ type Server struct {
 	// failGets makes the next GetActor calls fail, as a control plane under
 	// load does; see FailGets.
 	failGets injectedFailure
+	// RequireSourceTag makes CreateActor fail with FailedPrecondition when
+	// the actor's source_tag names no tag, as Substrate does.
+	RequireSourceTag bool
+	// failCreateTags makes the next CreateTag calls fail; see
+	// FailCreateTags. tagDeletes counts the DeleteTag calls.
+	failCreateTags injectedFailure
+	tagDeletes     int
+}
+
+// FailCreateTags makes the next n CreateTag calls fail with code, storing
+// nothing.
+func (s *Server) FailCreateTags(n int, code codes.Code) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failCreateTags = injectedFailure{n: n, code: code, msg: "injected tag failure"}
+}
+
+// TagNames returns the names of the tags that exist, sorted.
+func (s *Server) TagNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, t := range sortedValues(s.tags) {
+		out = append(out, t.GetMetadata().GetName())
+	}
+	return out
+}
+
+// TagDeletes is how many DeleteTag calls the fake took.
+func (s *Server) TagDeletes() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tagDeletes
+}
+
+// CreateTag tags the snapshot of a suspended actor, as Substrate does: the
+// source must exist, be SUSPENDED and hold a snapshot, and the name must be
+// free in the atespace. The copy is complete at once.
+func (s *Server) CreateTag(ctx context.Context, req *ateapipb.CreateTagRequest) (*ateapipb.Tag, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tag := req.GetTag()
+	if err := s.failCreateTags.take(); err != nil {
+		return nil, err
+	}
+	src, err := s.get(tag.GetSourceActor())
+	if err != nil {
+		return nil, err
+	}
+	if st := src.GetStatus().GetState(); st != ateapipb.ActorState_ACTOR_STATE_SUSPENDED || len(src.GetStatus().GetSnapshots()) == 0 {
+		return nil, status.Errorf(codes.FailedPrecondition, "actor %q holds no snapshot to tag (state %v)", tag.GetSourceActor().GetName(), st)
+	}
+	k := key(tag.GetMetadata().GetAtespace(), tag.GetMetadata().GetName())
+	if _, ok := s.tags[k]; ok {
+		return nil, status.Errorf(codes.AlreadyExists, "tag %q already exists", tag.GetMetadata().GetName())
+	}
+	stored := proto.Clone(tag).(*ateapipb.Tag)
+	stamp(stored.GetMetadata())
+	stored.Status = &ateapipb.TagStatus{Snapshot: proto.Clone(src.GetStatus().GetSnapshots()[0]).(*ateapipb.Snapshot)}
+	stored.Status.Snapshot.Owner = ateapipb.SnapshotOwner_SNAPSHOT_OWNER_TAG
+	s.tags[k] = stored
+	return proto.Clone(stored).(*ateapipb.Tag), nil
+}
+
+// DeleteTag deletes a tag; a missing one is NotFound.
+func (s *Server) DeleteTag(ctx context.Context, req *ateapipb.DeleteTagRequest) (*ateapipb.Tag, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tagDeletes++
+	k := key(req.GetTag().GetAtespace(), req.GetTag().GetName())
+	t, ok := s.tags[k]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "tag %q not found", req.GetTag().GetName())
+	}
+	delete(s.tags, k)
+	return t, nil
 }
 
 // injectedFailure fails the next n calls of one RPC with code and msg.
@@ -749,6 +825,20 @@ func (c inProcessControlClient) ListTags(ctx context.Context, in *ateapipb.ListT
 	return c.s.ListTags(ctx, in)
 }
 
+func (c inProcessControlClient) CreateTag(ctx context.Context, in *ateapipb.CreateTagRequest, _ ...grpc.CallOption) (*ateapipb.Tag, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
+	return c.s.CreateTag(ctx, in)
+}
+
+func (c inProcessControlClient) DeleteTag(ctx context.Context, in *ateapipb.DeleteTagRequest, _ ...grpc.CallOption) (*ateapipb.Tag, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
+	return c.s.DeleteTag(ctx, in)
+}
+
 func (c inProcessControlClient) ListWorkers(ctx context.Context, in *ateapipb.ListWorkersRequest, _ ...grpc.CallOption) (*ateapipb.ListWorkersResponse, error) {
 	if err := ctxErr(ctx); err != nil {
 		return nil, err
@@ -887,6 +977,9 @@ func (s *Server) CreateActor(ctx context.Context, req *ateapipb.CreateActorReque
 	}
 	if ref := actor.GetActorTemplate(); s.RequireTemplate && s.templates[key(ref.GetAtespace(), ref.GetName())] == nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "actor template not found; ObjectRef: %s/%s", ref.GetAtespace(), ref.GetName())
+	}
+	if ref := actor.GetSourceTag(); s.RequireSourceTag && ref != nil && s.tags[key(ref.GetAtespace(), ref.GetName())] == nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "source tag not found; ObjectRef: %s/%s", ref.GetAtespace(), ref.GetName())
 	}
 	return clone(s.store(k, actor)), nil
 }

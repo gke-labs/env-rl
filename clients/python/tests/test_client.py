@@ -171,6 +171,37 @@ async def test_get_missing_raises_not_found(fake_stack):
         await client.suspend("nope")
     with pytest.raises(NotFoundError):
         await client.delete("nope")
+    with pytest.raises(NotFoundError):
+        await client.fork("nope", 1)
+
+
+async def test_fork(fake_stack):
+    """AE-11: Client.fork and Env.fork send the request and return the copies."""
+    client, fakes = fake_stack
+    src = await client.create("src", atespace="team-a", worker_selector={"pool": "a"})
+
+    copies = await client.fork("src", 2, atespace="team-a", id_prefix="b", worker_selector={"pool": "b"})
+    req = fakes.environments.last_fork_request
+    assert (req.id, req.atespace, req.count, req.id_prefix) == ("src", "team-a", 2, "b")
+    assert dict(req.worker_selector) == {"pool": "b"}
+    assert [(c.id, c.atespace) for c in copies] == [("b-0", "team-a"), ("b-1", "team-a")]
+    assert (await copies[0].info()).worker_selector == {"pool": "b"}
+    assert (await src.info()).status == EnvironmentStatus.PAUSED
+
+    more = await src.fork(1, id_prefix="c")
+    req = fakes.environments.last_fork_request
+    assert not req.worker_selector and not req.ids
+    assert [c.id for c in more] == ["c-0"]
+    assert (await more[0].info()).worker_selector == {"pool": "a"}
+
+    named = await client.fork("src", 0, atespace="team-a", ids=["x", "y"])
+    assert [c.id for c in named] == ["x", "y"]
+
+    with pytest.raises(InvalidArgumentError):
+        await src.fork(65)
+    with pytest.raises(RpcError) as exc_info:
+        await client.fork("src", 1, atespace="team-a", ids=["x"])
+    assert exc_info.value.code == grpc.StatusCode.ALREADY_EXISTS
 
 
 async def test_server_info(fake_stack):

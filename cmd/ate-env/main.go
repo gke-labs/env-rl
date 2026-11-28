@@ -465,6 +465,52 @@ func newSuspendCommand() *cobra.Command {
 	return cmd
 }
 
+func newForkCommand() *cobra.Command {
+	var (
+		endpoint string
+		atespace string
+		count    int32
+		prefix   string
+		auth     authFlags
+	)
+	cmd := &cobra.Command{
+		Use:   "fork <id>",
+		Short: "Copy an environment, printing one copy id per line",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			token, err := auth.resolve(cmd)
+			if err != nil {
+				return err
+			}
+			client, err := env.NewClient(env.ClientOptions{
+				Endpoint:  endpoint,
+				AuthToken: token,
+			})
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			copies, err := client.Fork(cmd.Context(), &ateenvv1alpha.ForkEnvironmentRequest{
+				Id: args[0], Atespace: atespace, Count: count, IdPrefix: prefix,
+			})
+			if err != nil {
+				return err
+			}
+			for _, c := range copies {
+				fmt.Fprintln(cmd.OutOrStdout(), c.ID())
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&endpoint, "api", envOr("SUBSTRATE_ENV_API", "127.0.0.1:7777"), "address of the ate-env-api service (e.g. localhost:7777)")
+	cmd.Flags().StringVar(&atespace, "atespace", apiservice.DefaultAtespace, "Substrate atespace")
+	cmd.Flags().Int32Var(&count, "count", 1, "number of copies, 1 to 64")
+	cmd.Flags().StringVar(&prefix, "prefix", "", "name the copies <prefix>-<i> (defaults to <id>-<6 random hex digits>)")
+	auth.register(cmd, false)
+	return cmd
+}
+
 func newDeleteCommand() *cobra.Command {
 	var (
 		endpoint string
@@ -570,6 +616,7 @@ Common environment commands:
 	root.AddCommand(newPlacementDomainsCommand())
 	root.AddCommand(newWarmImageCommand())
 	root.AddCommand(newSuspendCommand())
+	root.AddCommand(newForkCommand())
 	root.AddCommand(newDeleteCommand())
 	root.AddCommand(newServerInfoCommand())
 

@@ -332,6 +332,10 @@ type CreateOptions struct {
 	// labels the worker pool must carry, matched by exact equality and ANDed
 	// by Substrate with the template's selector.
 	WorkerSelector map[string]string
+	// SourceTag, when set, is the Tag in Atespace the actor is seeded from
+	// (Actor.source_tag): it resumes from the tag's snapshot instead of
+	// booting. The tag must have been taken under Template.
+	SourceTag string
 }
 
 // check validates opts and returns the atespace with the default applied.
@@ -385,6 +389,9 @@ func (c *Client) CreateActor(ctx context.Context, opts CreateOptions) (*ateapipb
 	}
 	if len(opts.WorkerSelector) > 0 {
 		actor.WorkerSelector = &ateapipb.Selector{MatchLabels: maps.Clone(opts.WorkerSelector)}
+	}
+	if opts.SourceTag != "" {
+		actor.SourceTag = &ateapipb.ObjectRef{Atespace: atespace, Name: opts.SourceTag}
 	}
 	created, err := c.control.CreateActor(ctx, &ateapipb.CreateActorRequest{Actor: actor})
 	if err != nil {
@@ -765,6 +772,35 @@ func (c *Client) ref(atespace, id string) *ateapipb.ObjectRef {
 		atespace = DefaultAtespace
 	}
 	return &ateapipb.ObjectRef{Atespace: atespace, Name: id}
+}
+
+// CreateTag tags the snapshot of the suspended actor id in atespace as name,
+// scoped to that atespace. Substrate copies the snapshot into the tag, after
+// uploading it first when a local suspend left it on the node, thus the call
+// can take as long as that upload. If atespace is empty, DefaultAtespace is
+// used.
+func (c *Client) CreateTag(ctx context.Context, atespace, id, name string) (*ateapipb.Tag, error) {
+	ref := c.ref(atespace, id)
+	tag, err := c.control.CreateTag(ctx, &ateapipb.CreateTagRequest{Tag: &ateapipb.Tag{
+		Metadata:    &ateapipb.ResourceMetadata{Atespace: ref.GetAtespace(), Name: name},
+		Scope:       ateapipb.TagScope_TAG_SCOPE_ATESPACE,
+		SourceActor: ref,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("ate: tagging %q as %q: %w", id, name, wrapGRPCError(err))
+	}
+	return tag, nil
+}
+
+// DeleteTag deletes the Tag name in atespace and the snapshot it owns. An
+// actor seeded from the tag that has not suspended since becomes
+// unrecoverable, so callers delete a tag only once no such actor exists. If
+// atespace is empty, DefaultAtespace is used.
+func (c *Client) DeleteTag(ctx context.Context, atespace, name string) error {
+	if _, err := c.control.DeleteTag(ctx, &ateapipb.DeleteTagRequest{Tag: c.ref(atespace, name)}); err != nil {
+		return fmt.Errorf("ate: deleting tag %q: %w", name, wrapGRPCError(err))
+	}
+	return nil
 }
 
 func wrapGRPCError(err error) error {

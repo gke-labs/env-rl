@@ -554,6 +554,50 @@ class Client:
                 raise map_rpc_error(e) from e
         return _environment_info_from_pb(resp.environment)
 
+    async def fork(
+        self,
+        id: str,
+        count: int,
+        *,
+        atespace: str = DEFAULT_ATESPACE,
+        ids: Sequence[str] | None = None,
+        id_prefix: str | None = None,
+        worker_selector: Mapping[str, str] | None = None,
+    ) -> list[Env]:
+        """Copy the environment ``count`` times (1 to 64); returns the copies.
+
+        The server suspends the source locally, tags its snapshot and creates
+        each copy from the tag, so every copy resumes from the source's state
+        at the time of the call (memory and files); the source wakes on its
+        next call. Copies are named ``ids`` (count of them, distinct), else
+        ``"<id_prefix>-<i>"``, else ``"<id>-<6 random hex digits>-<i>"``.
+        ``worker_selector`` replaces the source's selector on the copies;
+        ``None`` keeps it. All or nothing: on an error the server deletes the
+        copies it made and the tag (a delete that fails is logged by the
+        server and leaves that copy).
+        ``server_info().features`` lists ``fork_environment`` once the server
+        serves it.
+        """
+        req = env_pb2.ForkEnvironmentRequest(
+            id=id,
+            atespace=atespace,
+            count=max(_INT32_MIN, min(count, _INT32_MAX)),
+            ids=list(ids or ()),
+            id_prefix=id_prefix or "",
+        )
+        if worker_selector:
+            req.worker_selector.update(worker_selector)
+        with self._rpc_span(
+            "fork_environment",
+            "ForkEnvironment",
+            lambda: {"ate.actor.name": id, "ate.atespace": atespace},
+        ):
+            try:
+                resp = await self._environments.ForkEnvironment(req, metadata=self._auth_metadata())
+            except grpc.RpcError as e:
+                raise map_rpc_error(e) from e
+        return [self.env(e.id, atespace=e.atespace) for e in resp.environments]
+
     async def server_info(self) -> ServerInfo:
         """Return the server's implementation, version and optional features.
 

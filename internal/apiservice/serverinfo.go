@@ -51,6 +51,8 @@ const (
 	// served, and the server deletes an environment after its deadline.
 	// Without the name, both are refused with FailedPrecondition.
 	FeatureTimeToLive = "time_to_live"
+	// FeatureForkEnvironment: ForkEnvironment is served.
+	FeatureForkEnvironment = "fork_environment"
 )
 
 const substrateModule = "go.ate.dev/substrate"
@@ -81,7 +83,7 @@ func (s *Server) GetServerInfo(ctx context.Context, req *ateenvv1alpha.GetServer
 
 // features lists the optional features this server serves, in a fixed order.
 func (s *Server) features() []string {
-	f := []string{FeatureRootfsImage, FeaturePTY, FeatureSuspendMode, FeatureImageStatus, FeaturePlacementDomains, FeatureWarmImage}
+	f := []string{FeatureRootfsImage, FeaturePTY, FeatureSuspendMode, FeatureImageStatus, FeaturePlacementDomains, FeatureWarmImage, FeatureForkEnvironment}
 	if s.Info.PortProxy {
 		f = append(f, FeaturePortProxy)
 	}

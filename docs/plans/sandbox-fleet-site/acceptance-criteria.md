@@ -203,18 +203,19 @@ Added by pull request 7.
 
 - Command:
   `go test -race -run 'TestServerSpansCarry|TestSetSpanActorAttributesKeepsKnownValues' ./internal/apiservice`,
-  which runs `TestServerSpansCarryEnvironmentIdentity`, `TestServerSpansCarryGuestCallIdentity`,
-  `TestServerSpansCarryTemplateIdentity`, `TestServerSpansCarryNoToken` and
-  `TestSetSpanActorAttributesKeepsKnownValues`.
+  which runs `TestServerSpansCarryEnvironmentIdentity`, `TestServerSpansCarryForkIdentity`,
+  `TestServerSpansCarryGuestCallIdentity`, `TestServerSpansCarryTemplateIdentity`,
+  `TestServerSpansCarryNoToken` and `TestSetSpanActorAttributesKeepsKnownValues`.
 - Expected: with tracing on, each `ate-env-api` server span carries the identity its call targets,
   under the `ateattr` keys `ateapi` stamps on its actor RPCs. `ate.atespace` and `ate.actor.name`
   (the environment id) go on the environment and the eight guest calls, also failed ones. Once
-  `CreateEnvironment` or `GetEnvironment` has the actor, `ate.actor.uid`, `ate.actor.version` (an
-  int64), `ate.template.name` and `ate.template.atespace` join them. `ListEnvironments` carries
-  `ate.atespace`. The template calls carry `ate.atespace`, `ate.template.name` and
-  `ate.template.atespace`, with the derived template once its name is known. `GetServerInfo` and a
-  `ListPlacementDomains` that names no template carry no `ate.*` attribute. A name Substrate would
-  refuse is not stamped. No span attribute, status or event carries the caller's bearer token.
+  `CreateEnvironment`, `GetEnvironment` or `ForkEnvironment` (the source) has the actor,
+  `ate.actor.uid`, `ate.actor.version` (an int64), `ate.template.name` and `ate.template.atespace`
+  join them. `ListEnvironments` carries `ate.atespace`. The template calls carry `ate.atespace`,
+  `ate.template.name` and `ate.template.atespace`, with the derived template once its name is known.
+  `GetServerInfo` and a `ListPlacementDomains` that names no template carry no `ate.*` attribute. A
+  name Substrate would refuse is not stamped. No span attribute, status or event carries the
+  caller's bearer token.
 - Pass rule: the named tests pass in the Go CI job, and in a Cloud Trace query on `ate.actor.name`
   an environment's `ate-env-api` and `ateapi` spans come up together.
 

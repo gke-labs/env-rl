@@ -57,7 +57,7 @@ defer client.Close()
 
 The `Client` lifecycle methods operate on environments. You can `Create` an environment and get an
 `Env` handle. The `Env` struct exposes `ID`, `Info`, and `Atespace` methods. Other lifecycle
-operations include `Get`, `List`, `SetTimeToLive`, `ServerInfo`, `EnsureImageTemplate`, and
+operations include `Get`, `List`, `SetTimeToLive`, `Fork`, `ServerInfo`, `EnsureImageTemplate`, and
 `ListPlacementDomains`.
 
 ```go
@@ -183,6 +183,27 @@ if err != nil {
 	panic(err)
 }
 fmt.Println(info.GetExpireTime().AsTime())
+```
+
+## Fork an environment
+
+`Fork` copies one environment 1 to 64 times. The server suspends the source locally, tags its
+snapshot and creates each copy from the tag, so every copy resumes from the source's memory and
+files. Copies are born suspended and wake on their first call, and the source wakes on its next
+call. A failed copy deletes the others and the tag (a delete that fails is logged by the server and
+leaves that copy). Copies get no labels and no deadline from the source. Check `ServerInfo` for the
+feature `fork_environment` first.
+
+```go
+copies, err := env.Fork(ctx, 4) // ids "<id>-<6 hex>-0" to "-3"
+if err != nil {
+	panic(err)
+}
+_, err = client.Fork(ctx, &ateenvv1alpha.ForkEnvironmentRequest{
+	Id:       "dev1",
+	IdPrefix: "dev1-branch",
+	Count:    2,
+})
 ```
 
 ## Warm the nodes of a worker pool before a run

@@ -534,6 +534,8 @@ func TestSpansParity(t *testing.T) {
 				err = c.Suspend(ctx, atespace, id)
 			case "delete_environment":
 				err = c.Delete(ctx, atespace, id)
+			case "fork_environment":
+				_, err = c.Fork(ctx, &ateenvv1alpha.ForkEnvironmentRequest{Id: id, Atespace: atespace, Count: 1})
 			case "get_server_info":
 				_, err = c.ServerInfo(ctx)
 			case "get_image_status":
