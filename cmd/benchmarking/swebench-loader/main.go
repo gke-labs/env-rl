@@ -1044,6 +1044,7 @@ func runCmd(args []string) (retErr error) {
 		convertTrace     = fs.String("convert-trace", "", "Convert a trace.jsonl file into schedule.json and trajectory.yaml before running (or exit if -dataset is omitted).")
 		traceOut         = fs.String("trace-out", "", "Output directory for -convert-trace artifacts.")
 		keep             = fs.Bool("keep", false, "Leave the environments in place when the run ends.")
+		adopt            = fs.Bool("adopt", false, "steps: start on the parked environments a previous run of the same -run-id left behind with -keep (ate-env-api only). Existing environments wake on step 1 and missing ones are created. Needs a suspend park.")
 		dryRun           = fs.Bool("dry-run", false, "Load and render everything, print the plan and exit without touching the API.")
 		authTokenFile    = fs.String("auth-token-file", "", "File that holds the bearer token for ate-env-api; surrounding whitespace is ignored. Without it, SUBSTRATE_ENV_AUTH_TOKEN is used when set.")
 		labels           = labelFlags{}
@@ -1078,7 +1079,7 @@ func runCmd(args []string) (retErr error) {
 		// A strategy owns the lifecycle: it parks by suspend (delete for
 		// none) and runs one pass. The step loop's flags would be recorded
 		// as labels of a run that never acted on them, so they are refused.
-		for _, name := range []string{"park", "step-pause", "park-each", "images-per-step", "create-width", "prefetch", "schedule"} {
+		for _, name := range []string{"park", "step-pause", "park-each", "images-per-step", "create-width", "adopt", "prefetch", "schedule"} {
 			if visited[name] {
 				return fmt.Errorf("-%s belongs to the step loop; -strategy %s parks by %s and runs one pass (omit -%s)",
 					name, *strategy, strategyPark(swebench.Strategy(*strategy)), name)
@@ -1290,6 +1291,7 @@ func runCmd(args []string) (retErr error) {
 		WakeBudget:    *wakeBudget,
 		WakeBackoff:   *wakeBackoff,
 		Keep:          *keep,
+		Adopt:         *adopt,
 		Labels:        labels,
 		Invocation:    ownLabels(*dataset, *connections, *deleteRate, *baseTemplate, *excludeFile, *placementPath, exclude, ids, effective),
 	}
@@ -1297,6 +1299,9 @@ func runCmd(args []string) (retErr error) {
 	// them too: the run id, the longest actor name against Substrate's 63
 	// characters, the -label keys, and the mode, strategy and park flags.
 	if err := swebench.ValidateConfig(cfg); err != nil {
+		return err
+	}
+	if err := swebench.ValidateAdoptDriver(*backendFlag, *accessFlag, *adopt); err != nil {
 		return err
 	}
 	// The placement plan is read and checked before -dry-run returns and
