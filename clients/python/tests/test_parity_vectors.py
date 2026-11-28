@@ -184,6 +184,7 @@ SHARED_SPAN_OPERATIONS = {
     "set_environment_time_to_live",
     "suspend_environment",
     "delete_environment",
+    "fork_environment",
     "get_server_info",
     "get_image_status",
     "ensure_image_template",
@@ -282,6 +283,8 @@ async def test_spans_parity(v, spans, fake_stack):
         await client.suspend(id_val, **atespace_kw)
     elif op == "delete_environment":
         await client.delete(id_val, **atespace_kw)
+    elif op == "fork_environment":
+        await client.fork(id_val, 1, **atespace_kw)
     elif op == "get_server_info":
         await client.server_info()
     elif op in ("get_image_status", "ensure_image_template"):

@@ -236,6 +236,34 @@ func TestServerSpansCarrySetTimeToLiveIdentity(t *testing.T) {
 		map[string]string{"ate.atespace": "team-a", "ate.actor.name": "missing"})
 }
 
+// FS-16: ForkEnvironment stamps the source's identity, also when the source
+// does not exist, and the source actor's full identity once it reads it.
+func TestServerSpansCarryForkIdentity(t *testing.T) {
+	st := newSpanTracer(t)
+	te := newTelemetryEnv(t, true)
+	ctx := context.Background()
+	if _, err := te.envClient.CreateEnvironment(ctx, &ateenvv1alpha.CreateEnvironmentRequest{Id: "ident"}); err != nil {
+		t.Fatal(err)
+	}
+	a, err := te.control.GetActor(ctx, &ateapipb.GetActorRequest{Actor: &ateapipb.ObjectRef{Atespace: space, Name: "ident"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork := func(req *ateenvv1alpha.ForkEnvironmentRequest) map[string]attribute.Value {
+		return st.call(envService+"ForkEnvironment", func() error {
+			_, err := te.envClient.ForkEnvironment(ctx, req)
+			return err
+		})
+	}
+	wantActor(t, "ForkEnvironment", fork(&ateenvv1alpha.ForkEnvironmentRequest{Id: "ident", Count: 1}), map[string]string{
+		"ate.atespace": space, "ate.actor.name": "ident",
+		"ate.template.name": tmpl, "ate.template.atespace": space,
+	}, a)
+	wantNames(t, "ForkEnvironment (missing)",
+		fork(&ateenvv1alpha.ForkEnvironmentRequest{Id: "missing", Atespace: "team-a", Count: 1}),
+		map[string]string{"ate.atespace": "team-a", "ate.actor.name": "missing"})
+}
+
 // FS-16: each of the eight guest calls carries the environment its x-env-id
 // and x-env-atespace metadata name, also when the environment does not
 // exist.

@@ -105,6 +105,18 @@
     }
   },
   {
+    "operation": "fork_environment",
+    "inputs": {
+      "id": "traced",
+      "atespace": "t-space"
+    },
+    "expected_span": "fork_environment",
+    "expected_attributes": {
+      "ate.actor.name": "traced",
+      "ate.atespace": "t-space"
+    }
+  },
+  {
     "operation": "delete_environment",
     "inputs": {
       "id": "traced",

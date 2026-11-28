@@ -223,6 +223,40 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+// TestFork: Client.Fork and Env.Fork return handles to the copies the real
+// handler creates (AE-11 of docs/plans/ate-env-api/acceptance-criteria.md),
+// and a refused request comes back as the server's code.
+func TestFork(t *testing.T) {
+	f := newFixture(t)
+	sb := f.create(t, "sb-src")
+	ctx := t.Context()
+
+	copies, err := f.client.Fork(ctx, &ateenvv1alpha.ForkEnvironmentRequest{
+		Id: "sb-src", Atespace: sb.Atespace(), Ids: []string{"sb-c0", "sb-c1"},
+	})
+	if err != nil {
+		t.Fatalf("Client.Fork: %v", err)
+	}
+	if len(copies) != 2 || copies[0].ID() != "sb-c0" || copies[1].ID() != "sb-c1" || copies[0].Atespace() != sb.Atespace() {
+		t.Fatalf("Client.Fork copies = %v, want sb-c0 and sb-c1 in %s", copies, sb.Atespace())
+	}
+	more, err := sb.Fork(ctx, 3)
+	if err != nil {
+		t.Fatalf("Env.Fork: %v", err)
+	}
+	if len(more) != 3 {
+		t.Fatalf("Env.Fork returned %d copies, want 3", len(more))
+	}
+	for _, c := range append(copies, more...) {
+		if _, err := c.Info(ctx); err != nil {
+			t.Errorf("Info(%s): %v", c.ID(), err)
+		}
+	}
+	if _, err := sb.Fork(ctx, 0); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("Env.Fork(0) = %v, want InvalidArgument", err)
+	}
+}
+
 // TestList: List reads the environments of an atespace page by page through
 // the real handler, with the status filter (AE-6, AE-8 and AE-9 of
 // docs/plans/ate-env-api/acceptance-criteria.md) and the create time (AE-10).

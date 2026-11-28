@@ -75,6 +75,7 @@ actor boots. Retry until it serves (see the how-to below).
 | `Client.get()` / `Env.info()` | `EnvironmentService.GetEnvironment` | ate-env-api → control plane |
 | `Client.suspend()` / `Env.suspend()` | `EnvironmentService.SuspendEnvironment` | ate-env-api → control plane |
 | `Client.delete()` / `Env.delete()` | `EnvironmentService.DeleteEnvironment` | ate-env-api → control plane |
+| `Client.fork()` / `Env.fork()` | `EnvironmentService.ForkEnvironment` | ate-env-api → control plane |
 | `Client.list_environments()` | `EnvironmentService.ListEnvironments` | ate-env-api → control plane |
 | `Client.set_time_to_live()` / `Env.set_time_to_live()` | `EnvironmentService.SetEnvironmentTimeToLive` | ate-env-api → control plane and its environment store |
 | `Client.server_info()` | `EnvironmentService.GetServerInfo` | answered by ate-env-api |

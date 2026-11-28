@@ -108,6 +108,12 @@ func (e *Env) SetTimeToLive(ctx context.Context, ttl time.Duration) (*ateenvv1al
 	return e.client.setTimeToLive(ctx, e.conn, e.atespace, e.id, ttl)
 }
 
+// Fork copies the environment count times with the server's default ids
+// and the environment's worker selector; see Client.Fork.
+func (e *Env) Fork(ctx context.Context, count int32) ([]*Env, error) {
+	return e.client.fork(ctx, e.conn, &ateenvv1alpha.ForkEnvironmentRequest{Id: e.id, Atespace: e.atespace, Count: count})
+}
+
 // Shell runs a shell command line inside the environment and captures its
 // output. It is shorthand for Run with only Command set.
 func (e *Env) Shell(ctx context.Context, commandLine string) (*ShellResponse, error) {

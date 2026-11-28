@@ -1361,6 +1361,161 @@ func (x *SetEnvironmentTimeToLiveResponse) GetEnvironment() *Environment {
 	return nil
 }
 
+// Request to copy one environment count times.
+type ForkEnvironmentRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Identifier of the source environment. Required.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Substrate atespace of the source and of the copies (defaults to
+	// "ate-env").
+	Atespace string `protobuf:"bytes,2,opt,name=atespace,proto3" json:"atespace,omitempty"`
+	// Number of copies, 1 to 64. 0 with ids set means len(ids). Outside that
+	// range is INVALID_ARGUMENT.
+	Count int32 `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	// Identifiers of the copies (DNS-1123 labels), count of them, distinct.
+	// Optional; excludes id_prefix.
+	Ids []string `protobuf:"bytes,4,rep,name=ids,proto3" json:"ids,omitempty"`
+	// Copies are named "<id_prefix>-<i>" for i in [0, count). Optional;
+	// without ids or id_prefix the prefix is "<id>-<6 random hex digits>"
+	// (the source id cut to 50 characters).
+	IdPrefix string `protobuf:"bytes,5,opt,name=id_prefix,json=idPrefix,proto3" json:"id_prefix,omitempty"`
+	// Worker selector of each copy, as CreateEnvironmentRequest.worker_selector.
+	// Empty keeps the source's.
+	WorkerSelector map[string]string `protobuf:"bytes,6,rep,name=worker_selector,json=workerSelector,proto3" json:"worker_selector,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ForkEnvironmentRequest) Reset() {
+	*x = ForkEnvironmentRequest{}
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForkEnvironmentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForkEnvironmentRequest) ProtoMessage() {}
+
+func (x *ForkEnvironmentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForkEnvironmentRequest.ProtoReflect.Descriptor instead.
+func (*ForkEnvironmentRequest) Descriptor() ([]byte, []int) {
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ForkEnvironmentRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ForkEnvironmentRequest) GetAtespace() string {
+	if x != nil {
+		return x.Atespace
+	}
+	return ""
+}
+
+func (x *ForkEnvironmentRequest) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *ForkEnvironmentRequest) GetIds() []string {
+	if x != nil {
+		return x.Ids
+	}
+	return nil
+}
+
+func (x *ForkEnvironmentRequest) GetIdPrefix() string {
+	if x != nil {
+		return x.IdPrefix
+	}
+	return ""
+}
+
+func (x *ForkEnvironmentRequest) GetWorkerSelector() map[string]string {
+	if x != nil {
+		return x.WorkerSelector
+	}
+	return nil
+}
+
+// Response returned after forking an environment.
+type ForkEnvironmentResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The copies, in the order of ids, or of i for "<id_prefix>-<i>".
+	Environments []*Environment `protobuf:"bytes,1,rep,name=environments,proto3" json:"environments,omitempty"`
+	// Name of the Substrate tag the copies were created from, in the source's
+	// atespace. The server does not delete it: Substrate makes a copy that has
+	// not suspended once unrecoverable when its tag goes. Delete it with
+	// Substrate's DeleteTag once every copy has suspended or been deleted.
+	SourceTag     string `protobuf:"bytes,2,opt,name=source_tag,json=sourceTag,proto3" json:"source_tag,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForkEnvironmentResponse) Reset() {
+	*x = ForkEnvironmentResponse{}
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForkEnvironmentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForkEnvironmentResponse) ProtoMessage() {}
+
+func (x *ForkEnvironmentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForkEnvironmentResponse.ProtoReflect.Descriptor instead.
+func (*ForkEnvironmentResponse) Descriptor() ([]byte, []int) {
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ForkEnvironmentResponse) GetEnvironments() []*Environment {
+	if x != nil {
+		return x.Environments
+	}
+	return nil
+}
+
+func (x *ForkEnvironmentResponse) GetSourceTag() string {
+	if x != nil {
+		return x.SourceTag
+	}
+	return ""
+}
+
 // Request for the server's identity and features.
 type GetServerInfoRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1370,7 +1525,7 @@ type GetServerInfoRequest struct {
 
 func (x *GetServerInfoRequest) Reset() {
 	*x = GetServerInfoRequest{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[17]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1382,7 +1537,7 @@ func (x *GetServerInfoRequest) String() string {
 func (*GetServerInfoRequest) ProtoMessage() {}
 
 func (x *GetServerInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[17]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1395,7 +1550,7 @@ func (x *GetServerInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServerInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetServerInfoRequest) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{17}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{19}
 }
 
 // Identity, version and optional features of the server.
@@ -1425,7 +1580,7 @@ type GetServerInfoResponse struct {
 
 func (x *GetServerInfoResponse) Reset() {
 	*x = GetServerInfoResponse{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[18]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1437,7 +1592,7 @@ func (x *GetServerInfoResponse) String() string {
 func (*GetServerInfoResponse) ProtoMessage() {}
 
 func (x *GetServerInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[18]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1450,7 +1605,7 @@ func (x *GetServerInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServerInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetServerInfoResponse) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{18}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetServerInfoResponse) GetServer() string {
@@ -1501,7 +1656,7 @@ type ListPlacementDomainsRequest struct {
 
 func (x *ListPlacementDomainsRequest) Reset() {
 	*x = ListPlacementDomainsRequest{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[19]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1513,7 +1668,7 @@ func (x *ListPlacementDomainsRequest) String() string {
 func (*ListPlacementDomainsRequest) ProtoMessage() {}
 
 func (x *ListPlacementDomainsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[19]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1526,7 +1681,7 @@ func (x *ListPlacementDomainsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlacementDomainsRequest.ProtoReflect.Descriptor instead.
 func (*ListPlacementDomainsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{19}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListPlacementDomainsRequest) GetTemplate() *Template {
@@ -1570,7 +1725,7 @@ type PlacementDomain struct {
 
 func (x *PlacementDomain) Reset() {
 	*x = PlacementDomain{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[20]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1582,7 +1737,7 @@ func (x *PlacementDomain) String() string {
 func (*PlacementDomain) ProtoMessage() {}
 
 func (x *PlacementDomain) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[20]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1595,7 +1750,7 @@ func (x *PlacementDomain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlacementDomain.ProtoReflect.Descriptor instead.
 func (*PlacementDomain) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{20}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *PlacementDomain) GetName() string {
@@ -1650,7 +1805,7 @@ type ListPlacementDomainsResponse struct {
 
 func (x *ListPlacementDomainsResponse) Reset() {
 	*x = ListPlacementDomainsResponse{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[21]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1662,7 +1817,7 @@ func (x *ListPlacementDomainsResponse) String() string {
 func (*ListPlacementDomainsResponse) ProtoMessage() {}
 
 func (x *ListPlacementDomainsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[21]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1675,7 +1830,7 @@ func (x *ListPlacementDomainsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlacementDomainsResponse.ProtoReflect.Descriptor instead.
 func (*ListPlacementDomainsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{21}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListPlacementDomainsResponse) GetDomains() []*PlacementDomain {
@@ -1729,7 +1884,7 @@ type WarmImageRequest struct {
 
 func (x *WarmImageRequest) Reset() {
 	*x = WarmImageRequest{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[22]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1741,7 +1896,7 @@ func (x *WarmImageRequest) String() string {
 func (*WarmImageRequest) ProtoMessage() {}
 
 func (x *WarmImageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[22]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1754,7 +1909,7 @@ func (x *WarmImageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarmImageRequest.ProtoReflect.Descriptor instead.
 func (*WarmImageRequest) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{22}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *WarmImageRequest) GetRootfsImage() string {
@@ -1834,7 +1989,7 @@ type WarmImageEvent struct {
 
 func (x *WarmImageEvent) Reset() {
 	*x = WarmImageEvent{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[23]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1846,7 +2001,7 @@ func (x *WarmImageEvent) String() string {
 func (*WarmImageEvent) ProtoMessage() {}
 
 func (x *WarmImageEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[23]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1859,7 +2014,7 @@ func (x *WarmImageEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarmImageEvent.ProtoReflect.Descriptor instead.
 func (*WarmImageEvent) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{23}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *WarmImageEvent) GetEvent() isWarmImageEvent_Event {
@@ -1919,7 +2074,7 @@ type WarmProbe struct {
 
 func (x *WarmProbe) Reset() {
 	*x = WarmProbe{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[24]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1931,7 +2086,7 @@ func (x *WarmProbe) String() string {
 func (*WarmProbe) ProtoMessage() {}
 
 func (x *WarmProbe) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[24]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1944,7 +2099,7 @@ func (x *WarmProbe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarmProbe.ProtoReflect.Descriptor instead.
 func (*WarmProbe) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{24}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *WarmProbe) GetId() string {
@@ -2011,7 +2166,7 @@ type WarmImageCoverage struct {
 
 func (x *WarmImageCoverage) Reset() {
 	*x = WarmImageCoverage{}
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[25]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2023,7 +2178,7 @@ func (x *WarmImageCoverage) String() string {
 func (*WarmImageCoverage) ProtoMessage() {}
 
 func (x *WarmImageCoverage) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[25]
+	mi := &file_proto_ateenv_v1alpha_env_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2036,7 +2191,7 @@ func (x *WarmImageCoverage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarmImageCoverage.ProtoReflect.Descriptor instead.
 func (*WarmImageCoverage) Descriptor() ([]byte, []int) {
-	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{25}
+	return file_proto_ateenv_v1alpha_env_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *WarmImageCoverage) GetNodes() []string {
@@ -2182,7 +2337,21 @@ const file_proto_ateenv_v1alpha_env_proto_rawDesc = "" +
 	"\ftime_to_live\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\n" +
 	"timeToLive\"a\n" +
 	" SetEnvironmentTimeToLiveResponse\x12=\n" +
-	"\venvironment\x18\x01 \x01(\v2\x1b.ateenv.v1alpha.EnvironmentR\venvironment\"\x16\n" +
+	"\venvironment\x18\x01 \x01(\v2\x1b.ateenv.v1alpha.EnvironmentR\venvironment\"\xb1\x02\n" +
+	"\x16ForkEnvironmentRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\batespace\x18\x02 \x01(\tR\batespace\x12\x14\n" +
+	"\x05count\x18\x03 \x01(\x05R\x05count\x12\x10\n" +
+	"\x03ids\x18\x04 \x03(\tR\x03ids\x12\x1b\n" +
+	"\tid_prefix\x18\x05 \x01(\tR\bidPrefix\x12c\n" +
+	"\x0fworker_selector\x18\x06 \x03(\v2:.ateenv.v1alpha.ForkEnvironmentRequest.WorkerSelectorEntryR\x0eworkerSelector\x1aA\n" +
+	"\x13WorkerSelectorEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"y\n" +
+	"\x17ForkEnvironmentResponse\x12?\n" +
+	"\fenvironments\x18\x01 \x03(\v2\x1b.ateenv.v1alpha.EnvironmentR\fenvironments\x12\x1d\n" +
+	"\n" +
+	"source_tag\x18\x02 \x01(\tR\tsourceTag\"\x16\n" +
 	"\x14GetServerInfoRequest\"\x92\x01\n" +
 	"\x15GetServerInfoResponse\x12\x16\n" +
 	"\x06server\x18\x01 \x01(\tR\x06server\x12\x18\n" +
@@ -2258,14 +2427,15 @@ const file_proto_ateenv_v1alpha_env_proto_rawDesc = "" +
 	"\x1aGOLDEN_SNAPSHOT_STATE_NONE\x10\x01\x12!\n" +
 	"\x1dGOLDEN_SNAPSHOT_STATE_PENDING\x10\x02\x12\x1f\n" +
 	"\x1bGOLDEN_SNAPSHOT_STATE_READY\x10\x03\x12 \n" +
-	"\x1cGOLDEN_SNAPSHOT_STATE_FAILED\x10\x042\xf4\b\n" +
+	"\x1cGOLDEN_SNAPSHOT_STATE_FAILED\x10\x042\xd8\t\n" +
 	"\x12EnvironmentService\x12h\n" +
 	"\x11CreateEnvironment\x12(.ateenv.v1alpha.CreateEnvironmentRequest\x1a).ateenv.v1alpha.CreateEnvironmentResponse\x12_\n" +
 	"\x0eGetEnvironment\x12%.ateenv.v1alpha.GetEnvironmentRequest\x1a&.ateenv.v1alpha.GetEnvironmentResponse\x12e\n" +
 	"\x10ListEnvironments\x12'.ateenv.v1alpha.ListEnvironmentsRequest\x1a(.ateenv.v1alpha.ListEnvironmentsResponse\x12k\n" +
 	"\x12SuspendEnvironment\x12).ateenv.v1alpha.SuspendEnvironmentRequest\x1a*.ateenv.v1alpha.SuspendEnvironmentResponse\x12h\n" +
 	"\x11DeleteEnvironment\x12(.ateenv.v1alpha.DeleteEnvironmentRequest\x1a).ateenv.v1alpha.DeleteEnvironmentResponse\x12}\n" +
-	"\x18SetEnvironmentTimeToLive\x12/.ateenv.v1alpha.SetEnvironmentTimeToLiveRequest\x1a0.ateenv.v1alpha.SetEnvironmentTimeToLiveResponse\x12\\\n" +
+	"\x18SetEnvironmentTimeToLive\x12/.ateenv.v1alpha.SetEnvironmentTimeToLiveRequest\x1a0.ateenv.v1alpha.SetEnvironmentTimeToLiveResponse\x12b\n" +
+	"\x0fForkEnvironment\x12&.ateenv.v1alpha.ForkEnvironmentRequest\x1a'.ateenv.v1alpha.ForkEnvironmentResponse\x12\\\n" +
 	"\rGetServerInfo\x12$.ateenv.v1alpha.GetServerInfoRequest\x1a%.ateenv.v1alpha.GetServerInfoResponse\x12T\n" +
 	"\x0eGetImageStatus\x12%.ateenv.v1alpha.GetImageStatusRequest\x1a\x1b.ateenv.v1alpha.ImageStatus\x12^\n" +
 	"\x13EnsureImageTemplate\x12*.ateenv.v1alpha.EnsureImageTemplateRequest\x1a\x1b.ateenv.v1alpha.ImageStatus\x12q\n" +
@@ -2285,7 +2455,7 @@ func file_proto_ateenv_v1alpha_env_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_ateenv_v1alpha_env_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_proto_ateenv_v1alpha_env_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_proto_ateenv_v1alpha_env_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_proto_ateenv_v1alpha_env_proto_goTypes = []any{
 	(EnvironmentStatus)(0),                   // 0: ateenv.v1alpha.EnvironmentStatus
 	(SuspendMode)(0),                         // 1: ateenv.v1alpha.SuspendMode
@@ -2307,31 +2477,34 @@ var file_proto_ateenv_v1alpha_env_proto_goTypes = []any{
 	(*DeleteEnvironmentResponse)(nil),        // 17: ateenv.v1alpha.DeleteEnvironmentResponse
 	(*SetEnvironmentTimeToLiveRequest)(nil),  // 18: ateenv.v1alpha.SetEnvironmentTimeToLiveRequest
 	(*SetEnvironmentTimeToLiveResponse)(nil), // 19: ateenv.v1alpha.SetEnvironmentTimeToLiveResponse
-	(*GetServerInfoRequest)(nil),             // 20: ateenv.v1alpha.GetServerInfoRequest
-	(*GetServerInfoResponse)(nil),            // 21: ateenv.v1alpha.GetServerInfoResponse
-	(*ListPlacementDomainsRequest)(nil),      // 22: ateenv.v1alpha.ListPlacementDomainsRequest
-	(*PlacementDomain)(nil),                  // 23: ateenv.v1alpha.PlacementDomain
-	(*ListPlacementDomainsResponse)(nil),     // 24: ateenv.v1alpha.ListPlacementDomainsResponse
-	(*WarmImageRequest)(nil),                 // 25: ateenv.v1alpha.WarmImageRequest
-	(*WarmImageEvent)(nil),                   // 26: ateenv.v1alpha.WarmImageEvent
-	(*WarmProbe)(nil),                        // 27: ateenv.v1alpha.WarmProbe
-	(*WarmImageCoverage)(nil),                // 28: ateenv.v1alpha.WarmImageCoverage
-	nil,                                      // 29: ateenv.v1alpha.Environment.WorkerSelectorEntry
-	nil,                                      // 30: ateenv.v1alpha.CreateEnvironmentRequest.WorkerSelectorEntry
-	nil,                                      // 31: ateenv.v1alpha.PlacementDomain.SelectorEntry
-	nil,                                      // 32: ateenv.v1alpha.WarmImageRequest.WorkerSelectorEntry
-	(*timestamppb.Timestamp)(nil),            // 33: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),              // 34: google.protobuf.Duration
+	(*ForkEnvironmentRequest)(nil),           // 20: ateenv.v1alpha.ForkEnvironmentRequest
+	(*ForkEnvironmentResponse)(nil),          // 21: ateenv.v1alpha.ForkEnvironmentResponse
+	(*GetServerInfoRequest)(nil),             // 22: ateenv.v1alpha.GetServerInfoRequest
+	(*GetServerInfoResponse)(nil),            // 23: ateenv.v1alpha.GetServerInfoResponse
+	(*ListPlacementDomainsRequest)(nil),      // 24: ateenv.v1alpha.ListPlacementDomainsRequest
+	(*PlacementDomain)(nil),                  // 25: ateenv.v1alpha.PlacementDomain
+	(*ListPlacementDomainsResponse)(nil),     // 26: ateenv.v1alpha.ListPlacementDomainsResponse
+	(*WarmImageRequest)(nil),                 // 27: ateenv.v1alpha.WarmImageRequest
+	(*WarmImageEvent)(nil),                   // 28: ateenv.v1alpha.WarmImageEvent
+	(*WarmProbe)(nil),                        // 29: ateenv.v1alpha.WarmProbe
+	(*WarmImageCoverage)(nil),                // 30: ateenv.v1alpha.WarmImageCoverage
+	nil,                                      // 31: ateenv.v1alpha.Environment.WorkerSelectorEntry
+	nil,                                      // 32: ateenv.v1alpha.CreateEnvironmentRequest.WorkerSelectorEntry
+	nil,                                      // 33: ateenv.v1alpha.ForkEnvironmentRequest.WorkerSelectorEntry
+	nil,                                      // 34: ateenv.v1alpha.PlacementDomain.SelectorEntry
+	nil,                                      // 35: ateenv.v1alpha.WarmImageRequest.WorkerSelectorEntry
+	(*timestamppb.Timestamp)(nil),            // 36: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),              // 37: google.protobuf.Duration
 }
 var file_proto_ateenv_v1alpha_env_proto_depIdxs = []int32{
 	3,  // 0: ateenv.v1alpha.Environment.template:type_name -> ateenv.v1alpha.Template
 	0,  // 1: ateenv.v1alpha.Environment.status:type_name -> ateenv.v1alpha.EnvironmentStatus
-	29, // 2: ateenv.v1alpha.Environment.worker_selector:type_name -> ateenv.v1alpha.Environment.WorkerSelectorEntry
-	33, // 3: ateenv.v1alpha.Environment.create_time:type_name -> google.protobuf.Timestamp
-	33, // 4: ateenv.v1alpha.Environment.expire_time:type_name -> google.protobuf.Timestamp
+	31, // 2: ateenv.v1alpha.Environment.worker_selector:type_name -> ateenv.v1alpha.Environment.WorkerSelectorEntry
+	36, // 3: ateenv.v1alpha.Environment.create_time:type_name -> google.protobuf.Timestamp
+	36, // 4: ateenv.v1alpha.Environment.expire_time:type_name -> google.protobuf.Timestamp
 	3,  // 5: ateenv.v1alpha.CreateEnvironmentRequest.template:type_name -> ateenv.v1alpha.Template
-	30, // 6: ateenv.v1alpha.CreateEnvironmentRequest.worker_selector:type_name -> ateenv.v1alpha.CreateEnvironmentRequest.WorkerSelectorEntry
-	34, // 7: ateenv.v1alpha.CreateEnvironmentRequest.time_to_live:type_name -> google.protobuf.Duration
+	32, // 6: ateenv.v1alpha.CreateEnvironmentRequest.worker_selector:type_name -> ateenv.v1alpha.CreateEnvironmentRequest.WorkerSelectorEntry
+	37, // 7: ateenv.v1alpha.CreateEnvironmentRequest.time_to_live:type_name -> google.protobuf.Duration
 	4,  // 8: ateenv.v1alpha.CreateEnvironmentResponse.environment:type_name -> ateenv.v1alpha.Environment
 	3,  // 9: ateenv.v1alpha.GetImageStatusRequest.template:type_name -> ateenv.v1alpha.Template
 	3,  // 10: ateenv.v1alpha.EnsureImageTemplateRequest.template:type_name -> ateenv.v1alpha.Template
@@ -2341,45 +2514,49 @@ var file_proto_ateenv_v1alpha_env_proto_depIdxs = []int32{
 	0,  // 14: ateenv.v1alpha.ListEnvironmentsRequest.statuses:type_name -> ateenv.v1alpha.EnvironmentStatus
 	4,  // 15: ateenv.v1alpha.ListEnvironmentsResponse.environments:type_name -> ateenv.v1alpha.Environment
 	1,  // 16: ateenv.v1alpha.SuspendEnvironmentRequest.mode:type_name -> ateenv.v1alpha.SuspendMode
-	34, // 17: ateenv.v1alpha.SetEnvironmentTimeToLiveRequest.time_to_live:type_name -> google.protobuf.Duration
+	37, // 17: ateenv.v1alpha.SetEnvironmentTimeToLiveRequest.time_to_live:type_name -> google.protobuf.Duration
 	4,  // 18: ateenv.v1alpha.SetEnvironmentTimeToLiveResponse.environment:type_name -> ateenv.v1alpha.Environment
-	3,  // 19: ateenv.v1alpha.ListPlacementDomainsRequest.template:type_name -> ateenv.v1alpha.Template
-	31, // 20: ateenv.v1alpha.PlacementDomain.selector:type_name -> ateenv.v1alpha.PlacementDomain.SelectorEntry
-	23, // 21: ateenv.v1alpha.ListPlacementDomainsResponse.domains:type_name -> ateenv.v1alpha.PlacementDomain
-	3,  // 22: ateenv.v1alpha.WarmImageRequest.template:type_name -> ateenv.v1alpha.Template
-	32, // 23: ateenv.v1alpha.WarmImageRequest.worker_selector:type_name -> ateenv.v1alpha.WarmImageRequest.WorkerSelectorEntry
-	34, // 24: ateenv.v1alpha.WarmImageRequest.probe_timeout:type_name -> google.protobuf.Duration
-	27, // 25: ateenv.v1alpha.WarmImageEvent.probe:type_name -> ateenv.v1alpha.WarmProbe
-	28, // 26: ateenv.v1alpha.WarmImageEvent.coverage:type_name -> ateenv.v1alpha.WarmImageCoverage
-	34, // 27: ateenv.v1alpha.WarmProbe.duration:type_name -> google.protobuf.Duration
-	34, // 28: ateenv.v1alpha.WarmImageCoverage.waited:type_name -> google.protobuf.Duration
-	5,  // 29: ateenv.v1alpha.EnvironmentService.CreateEnvironment:input_type -> ateenv.v1alpha.CreateEnvironmentRequest
-	10, // 30: ateenv.v1alpha.EnvironmentService.GetEnvironment:input_type -> ateenv.v1alpha.GetEnvironmentRequest
-	12, // 31: ateenv.v1alpha.EnvironmentService.ListEnvironments:input_type -> ateenv.v1alpha.ListEnvironmentsRequest
-	14, // 32: ateenv.v1alpha.EnvironmentService.SuspendEnvironment:input_type -> ateenv.v1alpha.SuspendEnvironmentRequest
-	16, // 33: ateenv.v1alpha.EnvironmentService.DeleteEnvironment:input_type -> ateenv.v1alpha.DeleteEnvironmentRequest
-	18, // 34: ateenv.v1alpha.EnvironmentService.SetEnvironmentTimeToLive:input_type -> ateenv.v1alpha.SetEnvironmentTimeToLiveRequest
-	20, // 35: ateenv.v1alpha.EnvironmentService.GetServerInfo:input_type -> ateenv.v1alpha.GetServerInfoRequest
-	7,  // 36: ateenv.v1alpha.EnvironmentService.GetImageStatus:input_type -> ateenv.v1alpha.GetImageStatusRequest
-	8,  // 37: ateenv.v1alpha.EnvironmentService.EnsureImageTemplate:input_type -> ateenv.v1alpha.EnsureImageTemplateRequest
-	22, // 38: ateenv.v1alpha.EnvironmentService.ListPlacementDomains:input_type -> ateenv.v1alpha.ListPlacementDomainsRequest
-	25, // 39: ateenv.v1alpha.EnvironmentService.WarmImage:input_type -> ateenv.v1alpha.WarmImageRequest
-	6,  // 40: ateenv.v1alpha.EnvironmentService.CreateEnvironment:output_type -> ateenv.v1alpha.CreateEnvironmentResponse
-	11, // 41: ateenv.v1alpha.EnvironmentService.GetEnvironment:output_type -> ateenv.v1alpha.GetEnvironmentResponse
-	13, // 42: ateenv.v1alpha.EnvironmentService.ListEnvironments:output_type -> ateenv.v1alpha.ListEnvironmentsResponse
-	15, // 43: ateenv.v1alpha.EnvironmentService.SuspendEnvironment:output_type -> ateenv.v1alpha.SuspendEnvironmentResponse
-	17, // 44: ateenv.v1alpha.EnvironmentService.DeleteEnvironment:output_type -> ateenv.v1alpha.DeleteEnvironmentResponse
-	19, // 45: ateenv.v1alpha.EnvironmentService.SetEnvironmentTimeToLive:output_type -> ateenv.v1alpha.SetEnvironmentTimeToLiveResponse
-	21, // 46: ateenv.v1alpha.EnvironmentService.GetServerInfo:output_type -> ateenv.v1alpha.GetServerInfoResponse
-	9,  // 47: ateenv.v1alpha.EnvironmentService.GetImageStatus:output_type -> ateenv.v1alpha.ImageStatus
-	9,  // 48: ateenv.v1alpha.EnvironmentService.EnsureImageTemplate:output_type -> ateenv.v1alpha.ImageStatus
-	24, // 49: ateenv.v1alpha.EnvironmentService.ListPlacementDomains:output_type -> ateenv.v1alpha.ListPlacementDomainsResponse
-	26, // 50: ateenv.v1alpha.EnvironmentService.WarmImage:output_type -> ateenv.v1alpha.WarmImageEvent
-	40, // [40:51] is the sub-list for method output_type
-	29, // [29:40] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	33, // 19: ateenv.v1alpha.ForkEnvironmentRequest.worker_selector:type_name -> ateenv.v1alpha.ForkEnvironmentRequest.WorkerSelectorEntry
+	4,  // 20: ateenv.v1alpha.ForkEnvironmentResponse.environments:type_name -> ateenv.v1alpha.Environment
+	3,  // 21: ateenv.v1alpha.ListPlacementDomainsRequest.template:type_name -> ateenv.v1alpha.Template
+	34, // 22: ateenv.v1alpha.PlacementDomain.selector:type_name -> ateenv.v1alpha.PlacementDomain.SelectorEntry
+	25, // 23: ateenv.v1alpha.ListPlacementDomainsResponse.domains:type_name -> ateenv.v1alpha.PlacementDomain
+	3,  // 24: ateenv.v1alpha.WarmImageRequest.template:type_name -> ateenv.v1alpha.Template
+	35, // 25: ateenv.v1alpha.WarmImageRequest.worker_selector:type_name -> ateenv.v1alpha.WarmImageRequest.WorkerSelectorEntry
+	37, // 26: ateenv.v1alpha.WarmImageRequest.probe_timeout:type_name -> google.protobuf.Duration
+	29, // 27: ateenv.v1alpha.WarmImageEvent.probe:type_name -> ateenv.v1alpha.WarmProbe
+	30, // 28: ateenv.v1alpha.WarmImageEvent.coverage:type_name -> ateenv.v1alpha.WarmImageCoverage
+	37, // 29: ateenv.v1alpha.WarmProbe.duration:type_name -> google.protobuf.Duration
+	37, // 30: ateenv.v1alpha.WarmImageCoverage.waited:type_name -> google.protobuf.Duration
+	5,  // 31: ateenv.v1alpha.EnvironmentService.CreateEnvironment:input_type -> ateenv.v1alpha.CreateEnvironmentRequest
+	10, // 32: ateenv.v1alpha.EnvironmentService.GetEnvironment:input_type -> ateenv.v1alpha.GetEnvironmentRequest
+	12, // 33: ateenv.v1alpha.EnvironmentService.ListEnvironments:input_type -> ateenv.v1alpha.ListEnvironmentsRequest
+	14, // 34: ateenv.v1alpha.EnvironmentService.SuspendEnvironment:input_type -> ateenv.v1alpha.SuspendEnvironmentRequest
+	16, // 35: ateenv.v1alpha.EnvironmentService.DeleteEnvironment:input_type -> ateenv.v1alpha.DeleteEnvironmentRequest
+	18, // 36: ateenv.v1alpha.EnvironmentService.SetEnvironmentTimeToLive:input_type -> ateenv.v1alpha.SetEnvironmentTimeToLiveRequest
+	20, // 37: ateenv.v1alpha.EnvironmentService.ForkEnvironment:input_type -> ateenv.v1alpha.ForkEnvironmentRequest
+	22, // 38: ateenv.v1alpha.EnvironmentService.GetServerInfo:input_type -> ateenv.v1alpha.GetServerInfoRequest
+	7,  // 39: ateenv.v1alpha.EnvironmentService.GetImageStatus:input_type -> ateenv.v1alpha.GetImageStatusRequest
+	8,  // 40: ateenv.v1alpha.EnvironmentService.EnsureImageTemplate:input_type -> ateenv.v1alpha.EnsureImageTemplateRequest
+	24, // 41: ateenv.v1alpha.EnvironmentService.ListPlacementDomains:input_type -> ateenv.v1alpha.ListPlacementDomainsRequest
+	27, // 42: ateenv.v1alpha.EnvironmentService.WarmImage:input_type -> ateenv.v1alpha.WarmImageRequest
+	6,  // 43: ateenv.v1alpha.EnvironmentService.CreateEnvironment:output_type -> ateenv.v1alpha.CreateEnvironmentResponse
+	11, // 44: ateenv.v1alpha.EnvironmentService.GetEnvironment:output_type -> ateenv.v1alpha.GetEnvironmentResponse
+	13, // 45: ateenv.v1alpha.EnvironmentService.ListEnvironments:output_type -> ateenv.v1alpha.ListEnvironmentsResponse
+	15, // 46: ateenv.v1alpha.EnvironmentService.SuspendEnvironment:output_type -> ateenv.v1alpha.SuspendEnvironmentResponse
+	17, // 47: ateenv.v1alpha.EnvironmentService.DeleteEnvironment:output_type -> ateenv.v1alpha.DeleteEnvironmentResponse
+	19, // 48: ateenv.v1alpha.EnvironmentService.SetEnvironmentTimeToLive:output_type -> ateenv.v1alpha.SetEnvironmentTimeToLiveResponse
+	21, // 49: ateenv.v1alpha.EnvironmentService.ForkEnvironment:output_type -> ateenv.v1alpha.ForkEnvironmentResponse
+	23, // 50: ateenv.v1alpha.EnvironmentService.GetServerInfo:output_type -> ateenv.v1alpha.GetServerInfoResponse
+	9,  // 51: ateenv.v1alpha.EnvironmentService.GetImageStatus:output_type -> ateenv.v1alpha.ImageStatus
+	9,  // 52: ateenv.v1alpha.EnvironmentService.EnsureImageTemplate:output_type -> ateenv.v1alpha.ImageStatus
+	26, // 53: ateenv.v1alpha.EnvironmentService.ListPlacementDomains:output_type -> ateenv.v1alpha.ListPlacementDomainsResponse
+	28, // 54: ateenv.v1alpha.EnvironmentService.WarmImage:output_type -> ateenv.v1alpha.WarmImageEvent
+	43, // [43:55] is the sub-list for method output_type
+	31, // [31:43] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_proto_ateenv_v1alpha_env_proto_init() }
@@ -2387,7 +2564,7 @@ func file_proto_ateenv_v1alpha_env_proto_init() {
 	if File_proto_ateenv_v1alpha_env_proto != nil {
 		return
 	}
-	file_proto_ateenv_v1alpha_env_proto_msgTypes[23].OneofWrappers = []any{
+	file_proto_ateenv_v1alpha_env_proto_msgTypes[25].OneofWrappers = []any{
 		(*WarmImageEvent_Probe)(nil),
 		(*WarmImageEvent_Coverage)(nil),
 	}
@@ -2397,7 +2574,7 @@ func file_proto_ateenv_v1alpha_env_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_ateenv_v1alpha_env_proto_rawDesc), len(file_proto_ateenv_v1alpha_env_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   30,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

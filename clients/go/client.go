@@ -63,8 +63,8 @@ type ClientOptions struct {
 	// TracerProvider, when set, makes the client emit OpenTelemetry spans
 	// named "<TraceServiceName>.<operation>" (create_environment,
 	// get_environment, list_environments, suspend_environment,
-	// delete_environment, set_environment_time_to_live, get_server_info,
-	// get_image_status,
+	// delete_environment, set_environment_time_to_live, fork_environment,
+	// get_server_info, get_image_status,
 	// ensure_image_template, list_placement_domains, warm_image,
 	// start_process, exec, read_file, write_file) with ate.* / ate_env.* attributes, the same as the Python
 	// client's, and send their W3C trace context to ate-env-api so its spans
@@ -409,6 +409,31 @@ func (c *Client) setTimeToLive(ctx context.Context, cn *conn, atespace, id strin
 		return nil, fromGRPCError(err)
 	}
 	return resp.GetEnvironment(), nil
+}
+
+// Fork copies the environment req.Id req.Count times (1 to 64) and returns
+// the copies, each on the connection the call went on. The server suspends
+// the source locally, tags its snapshot and creates each copy from the tag,
+// so every copy resumes from the source's state at the time of the call; the
+// source wakes on its next call. All or nothing: on an error the server
+// deletes the copies it made and the tag (a delete that fails is logged by
+// the server and leaves that copy). Check ServerInfo's features for "fork_environment" first.
+func (c *Client) Fork(ctx context.Context, req *ateenvv1alpha.ForkEnvironmentRequest) ([]*Env, error) {
+	return c.fork(ctx, c.pickEnv(), req)
+}
+
+func (c *Client) fork(ctx context.Context, cn *conn, req *ateenvv1alpha.ForkEnvironmentRequest) (_ []*Env, err error) {
+	ctx, span := c.tracer.startRPC(ctx, opForkEnvironment, "ForkEnvironment", AttrActorName.String(req.GetId()), AttrAtespace.String(req.GetAtespace()))
+	defer func() { endSpan(span, err) }()
+	resp, err := cn.env.ForkEnvironment(c.withAuth(ctx), req)
+	if err != nil {
+		return nil, fromGRPCError(err)
+	}
+	envs := make([]*Env, 0, len(resp.GetEnvironments()))
+	for _, e := range resp.GetEnvironments() {
+		envs = append(envs, c.envOn(cn, e.GetAtespace(), e.GetId()))
+	}
+	return envs, nil
 }
 
 // ServerInfo returns the server implementation, its version, the Substrate

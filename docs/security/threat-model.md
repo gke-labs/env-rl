@@ -189,6 +189,19 @@ The `editor` role of the access policy already allows that call, thus the RPC ad
 | A caller enumerates the environments of other callers | The token (Boundary 1). The list reads one atespace for each call, with the access that the policy gives `ate-env-api`: the `editor` role on the atespaces an operator adds. | The RPC has no list of allowed atespaces. With the global viewer binding (`ate-env manifest access-policy --global`, which `ListPlacementDomains` needs), `ate-env-api` can list the actors of each atespace of the control plane, also ones that ate-env did not create, thus a token holder can too. Each token holder reads the id, template, status, node and create time of every environment in every atespace that `ate-env-api` can read. Before, a caller had to know an id to read these with `GetEnvironment`. With an id, a token holder can already run commands in that environment (Boundary 1, one shared token). Tracked in #403; no mitigation is decided. |
 | Large responses | One call asks Substrate for at most 1000 actors (`MaxListPageSize`), 100 by default, and holds one page in memory. Substrate can return a few more than the page size. | No rate limit, as for the other RPCs. |
 
+## Forking an environment
+
+`ForkEnvironment` copies one environment up to 64 times in its own atespace. `ate-env-api`
+suspends the source, tags its snapshot with Substrate's `CreateTag` and creates each copy with
+`CreateActor` and `source_tag` set to the tag, under its own identity. The `editor` role on the
+atespace already allows these calls (`can_create_tag`, `can_use_tag` and `can_delete` on the tag),
+thus the RPC adds no privilege. It adds one RPC and no request field elsewhere.
+
+| Threat | Current mitigation | Gap |
+|---|---|---|
+| A caller reads another caller's environment through a copy | The token (Boundary 1). The source is named by atespace and id, as for `DeleteEnvironment` and the guest calls, and the copies stay in the source's atespace. A token holder who can fork an environment can already run commands in it. | One shared token and no list of allowed atespaces for this RPC. |
+| Resource growth | At most 64 copies for each call. Copies are born suspended and hold no worker slot until their first call. | No quota on copies, as on environments. The tag of a fork that succeeds stays, with its snapshot, because Substrate's `DeleteTag` makes a copy that has not suspended since unrecoverable; nothing removes it yet. Copies get no deadline from the source. |
+
 ## A time to live on an environment
 
 With the environment store on (`--environment-store=configmaps`, off by default),

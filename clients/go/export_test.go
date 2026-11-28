@@ -65,6 +65,7 @@ var SpanOperationsForTest = []string{
 	opSuspendEnvironment,
 	opDeleteEnvironment,
 	opSetEnvironmentTimeToLive,
+	opForkEnvironment,
 	opStartProcess,
 	opExec,
 	opReadFile,

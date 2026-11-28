@@ -23,6 +23,10 @@
     "go": "SetTimeToLive",
     "python": "set_time_to_live"
   },
+  "ForkEnvironment": {
+    "go": "Fork",
+    "python": "fork"
+  },
   "GetServerInfo": {
     "go": "ServerInfo",
     "python": "server_info"

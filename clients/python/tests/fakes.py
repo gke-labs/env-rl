@@ -64,6 +64,7 @@ class FakeEnvironmentService(env_pb2_grpc.EnvironmentServiceServicer):
         # Whether the server runs with the environment store, thus accepts a
         # time to live. Off, as ate-env-api is by default.
         self.time_to_live = False
+        self.last_fork_request: env_pb2.ForkEnvironmentRequest | None = None
         # Placement, for creates, ListPlacementDomains and WarmImage: the nodes
         # behind each value of the ate-env/domain selector label, the slots per node
         # per domain, whether the global role is missing, whether every probe
@@ -259,6 +260,30 @@ class FakeEnvironmentService(env_pb2_grpc.EnvironmentServiceServicer):
             await context.abort(grpc.StatusCode.NOT_FOUND, f'environment "{request.id}" not found')
         del self.environments[(request.atespace or "ate-env", request.id)]
         return env_pb2.DeleteEnvironmentResponse()
+
+    async def ForkEnvironment(self, request, context):
+        # Mirror ate-env-api: validate count and ids, suspend the source
+        # locally, then create every copy or none.
+        self.last_fork_request = request
+        source = await self._lookup(request, context)
+        atespace = request.atespace or "ate-env"
+        count = request.count or len(request.ids)
+        if not 1 <= count <= 64:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"count {request.count} is outside 1 to 64")
+        if request.ids and (request.id_prefix or len(request.ids) != count or len(set(request.ids)) != count):
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "bad ids")
+        ids = list(request.ids) or [f"{request.id_prefix or request.id + '-abc123'}-{i}" for i in range(count)]
+        if any((atespace, i) in self.environments for i in ids):
+            await context.abort(grpc.StatusCode.ALREADY_EXISTS, "a copy exists")
+        if source.status == env_pb2.ENVIRONMENT_STATUS_RUNNING:
+            source.status = env_pb2.ENVIRONMENT_STATUS_PAUSED
+        selector = request.worker_selector or source.worker_selector
+        copies = []
+        for i in ids:
+            copy = self._new_environment((atespace, i), source.template, selector)
+            copy.status = env_pb2.ENVIRONMENT_STATUS_SUSPENDED
+            copies.append(copy)
+        return env_pb2.ForkEnvironmentResponse(environments=copies, source_tag="fork-0123456789abcdef")
 
     def _image_status(self, request):
         template = env_pb2.Template(name="default-template", atespace="ate-env")

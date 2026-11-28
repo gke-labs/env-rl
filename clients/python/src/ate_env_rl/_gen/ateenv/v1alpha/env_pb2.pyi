@@ -244,6 +244,37 @@ class SetEnvironmentTimeToLiveResponse(_message.Message):
     environment: Environment
     def __init__(self, environment: _Optional[_Union[Environment, _Mapping]] = ...) -> None: ...
 
+class ForkEnvironmentRequest(_message.Message):
+    __slots__ = ("id", "atespace", "count", "ids", "id_prefix", "worker_selector")
+    class WorkerSelectorEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    ID_FIELD_NUMBER: _ClassVar[int]
+    ATESPACE_FIELD_NUMBER: _ClassVar[int]
+    COUNT_FIELD_NUMBER: _ClassVar[int]
+    IDS_FIELD_NUMBER: _ClassVar[int]
+    ID_PREFIX_FIELD_NUMBER: _ClassVar[int]
+    WORKER_SELECTOR_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    atespace: str
+    count: int
+    ids: _containers.RepeatedScalarFieldContainer[str]
+    id_prefix: str
+    worker_selector: _containers.ScalarMap[str, str]
+    def __init__(self, id: _Optional[str] = ..., atespace: _Optional[str] = ..., count: _Optional[int] = ..., ids: _Optional[_Iterable[str]] = ..., id_prefix: _Optional[str] = ..., worker_selector: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class ForkEnvironmentResponse(_message.Message):
+    __slots__ = ("environments", "source_tag")
+    ENVIRONMENTS_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_TAG_FIELD_NUMBER: _ClassVar[int]
+    environments: _containers.RepeatedCompositeFieldContainer[Environment]
+    source_tag: str
+    def __init__(self, environments: _Optional[_Iterable[_Union[Environment, _Mapping]]] = ..., source_tag: _Optional[str] = ...) -> None: ...
+
 class GetServerInfoRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...

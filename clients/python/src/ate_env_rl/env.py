@@ -127,6 +127,22 @@ class Env:
             self._id, time_to_live, atespace=self._atespace
         )
 
+    async def fork(
+        self,
+        count: int,
+        *,
+        id_prefix: str | None = None,
+        worker_selector: Mapping[str, str] | None = None,
+    ) -> list[Env]:
+        """Copy the environment ``count`` times; as in ``Client.fork``."""
+        return await self._client.fork(
+            self._id,
+            count,
+            atespace=self._atespace,
+            id_prefix=id_prefix,
+            worker_selector=worker_selector,
+        )
+
     # --- processes ---
 
     async def start_process(
