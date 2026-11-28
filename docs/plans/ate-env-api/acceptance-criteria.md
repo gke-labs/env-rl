@@ -104,6 +104,26 @@ filter and a time to live are part 2 of #387 and are not in these criteria.
 | AE-9  | With `statuses`, a page holds only the environments of the page read from Substrate whose status is in the set, and `next_page_token` is unchanged by the filter. Thus a page can be shorter than `page_size`, or empty with a token. Empty `statuses` keeps all. `ENVIRONMENT_STATUS_PAUSED` selects the environments `GetEnvironment` reports as paused. A value outside `EnvironmentStatus` is `InvalidArgument`, and no list call reaches Substrate. | met by #392 | `TestListEnvironmentsStatusFilter`           |
 | AE-10 | `Environment.create_time` equals the actor's `metadata.create_time` in the responses of `CreateEnvironment`, `GetEnvironment` and `ListEnvironments`.                                                                                                                                                                                                                                                                                                    | met by #392 | `TestEnvironmentCreateTime`                  |
 
+## Forking an environment
+
+### Scope
+
+`ForkEnvironment` copies one environment `count` times, for search and group rollouts that branch
+from one state (`ForkEnvironment` in
+[internal/apiservice/fork.go](../../../internal/apiservice/fork.go)). It suspends the source with
+`SuspendLocal`, tags its snapshot with Substrate's `CreateTag`, and creates each copy with
+`CreateActor` and `source_tag` set to the tag, under the source's template. The tag stays after a
+fork that succeeds, because Substrate's `DeleteTag` makes a copy that has not suspended since
+unrecoverable. Removing such tags is not in these criteria. Copies get no labels and no deadline
+(the request has neither, and the source's stay with the source).
+
+### Criteria
+
+| ID    | Criterion                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Status  | Tests                                                                                                     |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| AE-11 | `ForkEnvironment` suspends the source locally, creates one tag of its snapshot, and creates `count` copies (1 to `MaxForkCount`, 64) in the source's atespace with `source_tag` set to that tag, the source's template, and the request's worker selector or else the source's. It returns the copies in id order and the tag. A count outside the range, ids that do not match the count or repeat, ids with `id_prefix`, or an id over 63 characters are `InvalidArgument` before any call. A missing source is `NotFound`. | planned | `TestForkEnvironment`, `TestForkEnvironmentRejects`, `TestFork`, `test_fork`                              |
+| AE-12 | When a copy fails, the copies created are deleted, then the tag, and the error is returned. A source that cannot be suspended, or a tag that fails, leaves no copy and no tag.                                                                                                                                                                                                                                                                                                                                                | planned | `TestForkEnvironmentPartialFailure`, `TestForkEnvironmentCleansUpLostReply`, `TestForkEnvironmentRejects` |
+
 ## Wake budgets, fail-fast, and cancellation
 
 ### Scope
